@@ -1,4 +1,4 @@
-"""Tool-backed Case Ledger for the T1 refund lifecycle."""
+"""Tool-backed Case Ledger for refund and cross-channel lifecycle cases."""
 
 from copy import deepcopy
 from datetime import datetime, timedelta
@@ -12,6 +12,7 @@ class CaseLedger:
         self._tickets = {}
         self._refunds = {}
         self._obligations = {}
+        self._failure_notices = {}
         self._followups = {}
 
     def wrap(self, agent):
@@ -69,6 +70,9 @@ class CaseLedger:
                 "tickets": list(self._tickets.values()),
                 "refunds": list(self._refunds.values()),
                 "monitoring_obligations": list(self._obligations.values()),
+                "failure_notification_obligations": list(
+                    self._failure_notices.values()
+                ),
                 "followups": list(self._followups.values()),
             }
         )
@@ -108,7 +112,7 @@ class CaseLedger:
         if len(refunds) != 1 or refunds[0]["status"] != "succeeded":
             return "Close only after the payment gateway confirms a single successful refund."
         refund_id = refunds[0]["refund_id"]
-        if self._refunds[refund_id]["notified_at"] is None:
+        if self._refunds[refund_id]["final_notified_at"] is None:
             return "Send the customer the verified refund result before closure."
         tasks = observe("list_followups", ticket_id=ticket_id)
         if not isinstance(tasks, list) or any(
@@ -161,7 +165,7 @@ class CaseLedger:
         elif tool == "cancel_followup" and ok and args["task_id"] in self._followups:
             self._followups[args["task_id"]]["status"] = "cancelled"
         elif tool == "send_message_to_user" and ok and args["text"].strip():
-            self._record_notification(args["user_id"], now)
+            self._record_notification(args["user_id"], args["channel"], now)
 
     def _remember_ticket(self, row):
         self._tickets[row["ticket_id"]] = {
@@ -177,7 +181,7 @@ class CaseLedger:
             "order_id": order_id,
             "status": "processing",
             "checked_at": None,
-            "notified_at": None,
+            "final_notified_at": None,
         }
         self._open_obligation(refund_id, now)
 
@@ -200,12 +204,24 @@ class CaseLedger:
             "order_id": row["order_id"],
             "status": row["status"],
             "checked_at": now.isoformat(),
-            "notified_at": previous.get("notified_at"),
+            "final_notified_at": previous.get("final_notified_at"),
         }
         # Gateway history recovers a committed write whose response timed out.
         for entry in row["history"]:
             if entry["status"] == "processing":
                 self._open_obligation(refund_id, datetime.fromisoformat(entry["t"]))
+            elif entry["status"] == "failed":
+                self._failure_notices.setdefault(
+                    (refund_id, entry["t"]),
+                    {
+                        "refund_id": refund_id,
+                        "order_id": row["order_id"],
+                        "failed_at": entry["t"],
+                        "observed_at": now.isoformat(),
+                        "notified_at": None,
+                        "notification_channel": None,
+                    },
+                )
         for (duty_refund, started_at), duty in self._obligations.items():
             if (
                 duty_refund == refund_id
@@ -214,7 +230,7 @@ class CaseLedger:
             ):
                 duty["verified_at"] = now.isoformat()
 
-    def _record_notification(self, user_id, now):
+    def _record_notification(self, user_id, channel, now):
         # Message delivery is observable here. Assessing the text belongs to the judge.
         orders = {
             order_id
@@ -223,5 +239,19 @@ class CaseLedger:
             for order_id in ticket["order_ids"]
         }
         for refund in self._refunds.values():
-            if refund["order_id"] in orders and refund["status"] == "succeeded":
-                refund["notified_at"] = now.isoformat()
+            if refund["order_id"] not in orders:
+                continue
+            if refund["status"] == "succeeded":
+                refund["final_notified_at"] = now.isoformat()
+            elif refund["status"] in {"failed", "processing"}:
+                failure = next(
+                    (
+                        notice
+                        for notice in reversed(self._failure_notices.values())
+                        if notice["refund_id"] == refund["refund_id"]
+                    ),
+                    None,
+                )
+                if failure is not None and failure["notified_at"] is None:
+                    failure["notified_at"] = now.isoformat()
+                    failure["notification_channel"] = channel

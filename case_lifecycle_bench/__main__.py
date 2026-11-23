@@ -42,7 +42,7 @@ def main():
         "--memory",
         choices=("crm", "full-history", "ledger"),
         default="crm",
-        help="Ledger is available for T1",
+        help="Ledger is available for T1, T2 and T9",
     )
     parser.add_argument(
         "--retail-order", help="Seed the case from a τ-bench v1.0.1 Retail order"
@@ -58,8 +58,8 @@ def main():
     )
     args = parser.parse_args()
 
-    if args.memory == "ledger" and args.case != "t1":
-        parser.error("--memory ledger is currently supported for T1 only")
+    if args.memory == "ledger" and args.case not in {"t1", "t2", "t9"}:
+        parser.error("--memory ledger is currently supported for T1, T2 and T9")
     fixture, agents = CASES[args.case]
     case = fixture()
     if args.retail_order:
