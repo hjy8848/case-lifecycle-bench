@@ -56,6 +56,9 @@ def main():
     parser.add_argument(
         "--trace", action="store_true", help="Include the trajectory and state"
     )
+    parser.add_argument(
+        "--expect-case-sha256", help="Refuse to run a changed case fixture"
+    )
     args = parser.parse_args()
 
     if args.memory == "ledger" and args.case not in {"t1", "t2", "t9"}:
@@ -67,6 +70,9 @@ def main():
             case = retail_case(case, args.retail_order)
         except (ModuleNotFoundError, ValueError) as error:
             parser.error(str(error))
+    case_hash = hashlib.sha256(json.dumps(case, sort_keys=True).encode()).hexdigest()
+    if args.expect_case_sha256 and args.expect_case_sha256 != case_hash:
+        parser.error("Case differs from the pilot artifact; regenerate the pilot")
     gateway = None
     if args.user_model and not args.model:
         parser.error("--user-model requires --model")
@@ -113,9 +119,7 @@ def main():
                 "full-history": "full_history",
                 "ledger": "case_ledger",
             }[args.memory],
-            "case_sha256": hashlib.sha256(
-                json.dumps(case, sort_keys=True).encode()
-            ).hexdigest(),
+            "case_sha256": case_hash,
             "temperature": 0,
             "model_calls": gateway.calls,
         }

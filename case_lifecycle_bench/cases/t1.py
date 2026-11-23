@@ -1,13 +1,11 @@
 """The v0 silent refund case and deterministic agents for its smoke test."""
 
-import json
-from datetime import datetime, timedelta
-from pathlib import Path
+from ._tools import cancel_pending_followups, load_fixture, schedule_followup
 
 
 def t1_case() -> dict:
     """Load a fresh T1 fixture, written in the JSON subset of YAML 1.2."""
-    return json.loads(Path(__file__).with_name("t1.yaml").read_text(encoding="utf-8"))
+    return load_fixture("t1")
 
 
 def oracle(session, call):
@@ -25,14 +23,8 @@ def duplicate_refund(session, call):
     return _run(session, call, repeat_on_revisit=True)
 
 
-def _schedule(session, call, ticket_id, hours, refund_id):
-    due_at = datetime.fromisoformat(session["t"]) + timedelta(hours=hours)
-    call(
-        "schedule_followup",
-        ticket_id=ticket_id,
-        due_at=due_at.isoformat(),
-        note=f"核实退款 {refund_id} 的支付网关状态。",
-    )
+def _followup_note(refund_id):
+    return f"核实退款 {refund_id} 的支付网关状态。"
 
 
 def _run(session, call, *, schedule_initial=True, repeat_on_revisit=False):
@@ -60,7 +52,9 @@ def _run(session, call, *, schedule_initial=True, repeat_on_revisit=False):
             )
             refund_id = call("issue_refund", order_id=order_id, amount=order["amount"])
             if schedule_initial:
-                _schedule(session, call, ticket_id, 47, refund_id)
+                schedule_followup(
+                    session, call, ticket_id, 47, _followup_note(refund_id)
+                )
             call(
                 "add_ticket_note",
                 ticket_id=ticket_id,
@@ -86,7 +80,7 @@ def _run(session, call, *, schedule_initial=True, repeat_on_revisit=False):
             channel=channel,
             text="原退款处理失败，已重试同一笔退款。",
         )
-        _schedule(session, call, ticket_id, 48, refund_id)
+        schedule_followup(session, call, ticket_id, 48, _followup_note(refund_id))
         call(
             "add_ticket_note",
             ticket_id=ticket_id,
@@ -102,6 +96,7 @@ def _run(session, call, *, schedule_initial=True, repeat_on_revisit=False):
             channel=channel,
             text="已核实退款到账。",
         )
+        cancel_pending_followups(call, ticket_id, _followup_note(refund_id))
         call(
             "add_ticket_note",
             ticket_id=ticket_id,

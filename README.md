@@ -44,6 +44,29 @@ $traces = (Get-ChildItem -LiteralPath runs/memory-panel -Filter '*--*.json').Ful
 python -m case_lifecycle_bench.compare --panel runs/panel-seed300.json $traces
 ```
 
+## 首周正式冒烟
+
+重新生成 Pilot，使用新规格下经 Oracle 验收的 30 个用例。每个用例用 CRM 在 Poll-only 和 Event-push 下各跑三次，客服模型为 `qwen3.6-plus`。用户模拟器固定使用通过预检的独立模型。三个试次以 0–2 编号。下面用候选 `DeepSeek-V4-Flash` 演示命令。
+
+```powershell
+python -m case_lifecycle_bench.pilot --seed 300 --output runs/pilot-duty-seed300.json
+$userModel = 'DeepSeek-V4-Flash'
+python -m case_lifecycle_bench.panel_run --pilot runs/pilot-duty-seed300.json --output runs/official-smoke --model qwen3.6-plus --user-model $userModel --workers 2 --dry-run
+python -m case_lifecycle_bench.panel_run --pilot runs/pilot-duty-seed300.json --output runs/official-smoke --model qwen3.6-plus --user-model $userModel --workers 2
+```
+
+在相同的 τ-bench v1.0.1 环境中运行原版 Retail 基线。下面沿用相同的两个角色模型，显式指定 base split、50 题、seed 300，并保留原版的 200 步上限。网关地址和凭据从当前进程环境传入。
+
+```powershell
+$env:OPENAI_API_KEY = $env:CASE_LIFECYCLE_API_KEY
+try {
+    $gatewayArgs = @{api_base = $env:CASE_LIFECYCLE_API_BASE; temperature = 0; num_retries = 0} | ConvertTo-Json -Compress
+    python -m tau2.cli run --domain retail --task-split-name base --num-tasks 50 --num-trials 1 --seed 300 --max-steps 200 --max-concurrency 2 --max-retries 0 --agent-llm openai/qwen3.6-plus --agent-llm-args $gatewayArgs --user-llm "openai/$userModel" --user-llm-args $gatewayArgs --save-to (Join-Path $PWD 'runs/tau-retail-50')
+} finally {
+    Remove-Item Env:OPENAI_API_KEY -ErrorAction SilentlyContinue
+}
+```
+
 ## 项目状态
 
 当前分工、验收证据和待办统一维护在 [工作进度](PROGRESS.md)。

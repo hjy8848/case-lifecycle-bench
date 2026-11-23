@@ -34,7 +34,7 @@
       "id": "E1",
       "t": "D2 09:00",
       "op": "refund.set_status(first_refund(O1), failed, reason=gateway_error)",
-      "notify_agent": false,
+      "notify_agent": true,
       "duty": "P3.refund_48h"
     },
     {

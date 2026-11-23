@@ -10,7 +10,9 @@ def t9_case() -> dict:
     case["case_id"] = "cross_channel_revisit_001"
     case["template"] = "cross_channel_revisit"
     case["capabilities"] = ["continuity"]
+    # Place the email after both Oracle retries and before either settles.
     case["visits"][1].update(
+        t="D3 15:00",
         channel="email",
         goal="查询之前申请的退款进度，不主动提供订单号或工单号。",
         utterance="之前申请的退款还没到账，请帮我查一下进度。",

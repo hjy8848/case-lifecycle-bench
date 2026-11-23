@@ -1,14 +1,79 @@
-"""Run the three memory settings on every case in a fixed comparison panel."""
+"""Run a fixed memory comparison or the paired CRM pilot smoke test."""
 
 import argparse
+import hashlib
 import json
 import os
 import subprocess
 import sys
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from dataclasses import dataclass
 from pathlib import Path
 
 SETTINGS = ("crm", "full-history", "ledger")
+SMOKE_WAKES = ("poll", "push")
+SMOKE_TRIALS = 3
+PILOT_TEMPLATES = {
+    "refund_silent_failure": "t1",
+    "refund_timeout_committed": "t2",
+    "cancel_partial_success": "t3",
+    "cross_channel_revisit": "t9",
+}
+
+
+@dataclass(frozen=True)
+class Job:
+    case: dict
+    memory: str
+    wake: str
+    trial: int | None = None
+
+    @property
+    def filename(self):
+        identifier = self.case["case_id"]
+        if self.trial is None:
+            return f"{identifier}--{self.memory}.json"
+        return f"{identifier}--{self.wake}--{self.trial}.json"
+
+    @property
+    def label(self):
+        return self.filename.removesuffix(".json")
+
+
+def _smoke_panel(pilot):
+    records = pilot["results"]
+    if len(records) != 30:
+        raise ValueError("The official smoke protocol expects 30 pilot cases")
+    panel = []
+    for record in records:
+        case = record["case"]
+        if not all(
+            record["wake_modes"][wake]["evaluation"]["metrics"]["case_resolution"]
+            for wake in SMOKE_WAKES
+        ):
+            raise ValueError(
+                f"Pilot case {case['case_id']} failed offline Oracle validation"
+            )
+        if any(
+            event.get("duty") and not event.get("notify_agent")
+            for event in case["events"]
+        ):
+            raise ValueError(
+                f"Regenerate the pilot: {case['case_id']} has a silent duty event"
+            )
+        panel.append(
+            {
+                "case_id": case["case_id"],
+                "template": PILOT_TEMPLATES[case["template"]],
+                "order_id": case["retail_source"]["order_id"],
+                "case_sha256": hashlib.sha256(
+                    json.dumps(case, sort_keys=True).encode()
+                ).hexdigest(),
+            }
+        )
+    if len({row["order_id"] for row in panel}) != len(panel):
+        raise ValueError("The smoke protocol expects unique pilot orders")
+    return {"cases": panel}
 
 
 def _write(path, result):
@@ -19,8 +84,15 @@ def _write(path, result):
     partial.replace(path)
 
 
-def _validate(result, case, memory, args):
-    expected = (case["case_id"], memory, args.wake, args.model, args.user_model)
+def _validate(result, job, args):
+    expected = (
+        job.case["case_id"],
+        job.memory,
+        job.wake,
+        args.model,
+        args.user_model,
+        job.trial,
+    )
     meta = result.get("meta", {})
     actual = (
         result.get("case_id"),
@@ -28,63 +100,78 @@ def _validate(result, case, memory, args):
         result.get("wake"),
         meta.get("agent_model"),
         meta.get("user_model"),
+        result.get("trial"),
     )
     if actual != expected or "run" not in result or "evaluation" not in result:
-        raise ValueError(
-            f"Unexpected model-run metadata for {case['case_id']} / {memory}"
-        )
+        raise ValueError(f"Unexpected model-run metadata for {job.label}")
+    if job.trial is not None and meta.get("case_sha256") != job.case["case_sha256"]:
+        raise ValueError(f"Pilot case hash differs from the run for {job.label}")
 
 
-def _run(case, memory, path, args):
+def _run(job, path, args):
     command = [
         sys.executable,
         "-m",
         "case_lifecycle_bench",
         "--case",
-        case["template"],
+        job.case["template"],
         "--retail-order",
-        case["order_id"],
+        job.case["order_id"],
         "--memory",
-        memory,
+        job.memory,
         "--wake",
-        args.wake,
+        job.wake,
         "--model",
         args.model,
         "--user-model",
         args.user_model,
         "--trace",
     ]
+    if job.trial is not None:
+        command.extend(("--expect-case-sha256", job.case["case_sha256"]))
     completed = subprocess.run(
         command, capture_output=True, encoding="utf-8", errors="replace"
     )
     if completed.returncode:
         error = completed.stderr.strip().splitlines()[-1:] or ["No diagnostic output"]
-        raise RuntimeError(f"{case['case_id']} / {memory}: {error[0]}")
+        raise RuntimeError(f"{job.label}: {error[0]}")
     result = json.loads(completed.stdout)
-    _validate(result, case, memory, args)
+    if job.trial is not None:
+        result["trial"] = job.trial
+    _validate(result, job, args)
     _write(path, result)
     return result["evaluation"]["metrics"]["case_resolution"]
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--panel", type=Path, required=True)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--panel", type=Path, help="Run the memory comparison panel")
+    source.add_argument(
+        "--pilot", type=Path, help="Run the 30-case official CRM smoke protocol"
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--user-model")
     parser.add_argument("--wake", choices=("poll", "push"), default="poll")
     parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate and count jobs without API calls",
+    )
     args = parser.parse_args()
     if args.workers < 1:
         parser.error("--workers must be positive")
-    if not all(
-        os.environ.get(key)
-        for key in ("CASE_LIFECYCLE_API_BASE", "CASE_LIFECYCLE_API_KEY")
-    ):
-        parser.error("Set CASE_LIFECYCLE_API_BASE and CASE_LIFECYCLE_API_KEY")
     args.user_model = args.user_model or args.model
-    panel = json.loads(args.panel.read_text(encoding="utf-8-sig"))
-    args.output.mkdir(parents=True, exist_ok=True)
+    if args.pilot and args.user_model == args.model:
+        parser.error("The official smoke protocol requires a separate --user-model")
+    source_file = args.pilot or args.panel
+    dataset = json.loads(source_file.read_text(encoding="utf-8-sig"))
+    try:
+        panel = _smoke_panel(dataset) if args.pilot else dataset
+    except (KeyError, ValueError) as error:
+        parser.error(str(error))
     manifest = {
         "model": args.model,
         "user_model": args.user_model,
@@ -92,6 +179,42 @@ def main():
         "settings": list(SETTINGS),
         "panel": panel,
     }
+    if args.pilot:
+        manifest.pop("wake")
+        manifest.update(
+            protocol="smoke",
+            settings=["crm"],
+            wakes=list(SMOKE_WAKES),
+            trials=SMOKE_TRIALS,
+        )
+
+    planned = []
+    seen = set()
+    for case in panel["cases"]:
+        identifier = case["case_id"]
+        if identifier in seen or Path(identifier).name != identifier:
+            parser.error(f"Invalid or repeated case ID: {identifier}")
+        seen.add(identifier)
+        if args.pilot:
+            planned.extend(
+                Job(case, "crm", wake, trial)
+                for trial in range(SMOKE_TRIALS)
+                for wake in SMOKE_WAKES
+            )
+        else:
+            planned.extend(Job(case, memory, args.wake) for memory in SETTINGS)
+    if args.dry_run:
+        print(
+            f"{len(panel['cases'])} cases, {len(planned)} model runs, {args.workers} workers"
+        )
+        return
+    if not all(
+        os.environ.get(key)
+        for key in ("CASE_LIFECYCLE_API_BASE", "CASE_LIFECYCLE_API_KEY")
+    ):
+        parser.error("Set CASE_LIFECYCLE_API_BASE and CASE_LIFECYCLE_API_KEY")
+
+    args.output.mkdir(parents=True, exist_ok=True)
     manifest_path = args.output / "manifest.json"
     if manifest_path.exists():
         if json.loads(manifest_path.read_text(encoding="utf-8")) != manifest:
@@ -101,19 +224,13 @@ def main():
 
     jobs = []
     done_count = 0
-    seen = set()
-    for case in panel["cases"]:
-        identifier = case["case_id"]
-        if identifier in seen or Path(identifier).name != identifier:
-            parser.error(f"Invalid or repeated case ID: {identifier}")
-        seen.add(identifier)
-        for memory in SETTINGS:
-            path = args.output / f"{identifier}--{memory}.json"
-            if not path.exists():
-                jobs.append((case, memory, path))
-                continue
-            _validate(json.loads(path.read_text(encoding="utf-8")), case, memory, args)
-            done_count += 1
+    for job in planned:
+        path = args.output / job.filename
+        if not path.exists():
+            jobs.append((job, path))
+            continue
+        _validate(json.loads(path.read_text(encoding="utf-8")), job, args)
+        done_count += 1
 
     total = done_count + len(jobs)
     print(f"{done_count}/{total} runs already saved", flush=True)
@@ -122,16 +239,16 @@ def main():
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         in_flight = {}
 
-        def submit(job):
-            case, memory, path = job
-            in_flight[pool.submit(_run, case, memory, path, args)] = job
+        def submit(entry):
+            job, path = entry
+            in_flight[pool.submit(_run, job, path, args)] = job
 
         for _ in range(min(args.workers, len(jobs))):
             submit(next(pending_jobs))
         while in_flight:
             completed, _ = wait(in_flight, return_when=FIRST_COMPLETED)
             for future in completed:
-                case, memory, _ = in_flight.pop(future)
+                job = in_flight.pop(future)
                 try:
                     resolved = future.result()
                 except (ValueError, RuntimeError) as error:
@@ -140,7 +257,7 @@ def main():
                 else:
                     done_count += 1
                     print(
-                        f"{done_count}/{total} {case['case_id']} {memory} resolved={resolved}",
+                        f"{done_count}/{total} {job.label} resolved={resolved}",
                         flush=True,
                     )
             if not failed:
