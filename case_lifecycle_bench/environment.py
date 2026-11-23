@@ -86,6 +86,10 @@ class _Environment:
             "outbox": {},
             "handoffs": {},
         }
+        if "refund_eligibility" in init:
+            self.state["orders"][self.order_id]["refund_eligibility"] = init[
+                "refund_eligibility"
+            ]
         for patch in init.get("db_patch", []):
             self._patch_fulfillment(patch)
         if self.state["fulfillment"] and "order_status" not in init:

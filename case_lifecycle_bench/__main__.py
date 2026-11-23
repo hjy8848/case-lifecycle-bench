@@ -5,7 +5,7 @@ import hashlib
 import json
 import os
 
-from .cases import t1, t2, t3
+from .cases import t1, t2, t3, t9
 from .environment import run_case
 from .evaluation import evaluate_case
 from .model_agent import ChatGateway, model_agent
@@ -29,6 +29,7 @@ CASES = {
             "premature-refund": t3.premature_refund,
         },
     ),
+    "t9": (t9.t9_case, {"oracle": t9.oracle, "duplicate-ticket": t9.duplicate_ticket}),
 }
 
 
@@ -39,7 +40,7 @@ def main():
     parser.add_argument("--agent", default="oracle")
     parser.add_argument(
         "--memory",
-        choices=("crm", "ledger"),
+        choices=("crm", "full-history", "ledger"),
         default="crm",
         help="Ledger is available for T1",
     )
@@ -90,11 +91,16 @@ def main():
 
         ledger = CaseLedger()
         agent = ledger.wrap(agent)
+    elif args.memory == "full-history":
+        from .history import FullHistory
+
+        agent = FullHistory().wrap(agent)
     run = run_case(case, agent, wake=args.wake)
     result = {
         "case_id": case["case_id"],
         "agent": args.model or args.agent,
         "wake": args.wake,
+        "memory": args.memory,
         "evaluation": evaluate_case(case, run),
     }
     if gateway is not None:
@@ -102,7 +108,11 @@ def main():
             "api_base": gateway.api_base,
             "agent_model": args.model,
             "user_model": args.user_model or args.model,
-            "memory": "case_ledger" if ledger is not None else "stateless_crm",
+            "memory": {
+                "crm": "stateless_crm",
+                "full-history": "full_history",
+                "ledger": "case_ledger",
+            }[args.memory],
             "case_sha256": hashlib.sha256(
                 json.dumps(case, sort_keys=True).encode()
             ).hexdigest(),

@@ -303,6 +303,7 @@ def evaluate_case(case: dict, run: dict) -> dict:
         "refund_silent_failure": evaluate_t1,
         "refund_timeout_committed": evaluate_t2,
         "cancel_partial_success": evaluate_t3,
+        "cross_channel_revisit": evaluate_t9,
     }
     template = case["template"]
     if template not in evaluators:
@@ -608,6 +609,87 @@ def evaluate_t2(case: dict, run: dict) -> dict:
         commitments,
     )
     evaluation["evidence"] = evidence
+    return evaluation
+
+
+def _t9_ticket_reuse(records, ticket_id, user_id):
+    found_original = False
+    for row in records:
+        if row["kind"] != "tool_call":
+            continue
+        result = row["result"]
+        if (
+            row["tool"] == "search_tickets"
+            and row["args"].get("user_id") == user_id
+            and isinstance(result, list)
+        ):
+            found_original = found_original or any(
+                ticket["ticket_id"] == ticket_id for ticket in result
+            )
+        if (
+            found_original
+            and row["tool"] == "get_ticket"
+            and isinstance(result, dict)
+            and result.get("ticket_id") == ticket_id
+        ):
+            return True
+    return False
+
+
+def evaluate_t9(case: dict, run: dict) -> dict:
+    """Score the T1 refund lifecycle and CRM continuity across channels."""
+    evaluation = evaluate_t1(case, run)
+    sessions, _, actions = _trace_records(run["trajectory"])
+    user_id = case["init"]["user"]
+    order_id = case["init"]["order"]
+
+    def matching_ticket(ticket):
+        return ticket["user_id"] == user_id and order_id in ticket["order_ids"]
+
+    tickets_at_start = [
+        ticket_id
+        for ticket_id, ticket in run["initial_state"]["tickets"].items()
+        if matching_ticket(ticket)
+    ]
+    creations = [
+        (row, ticket_id)
+        for row in actions["create_ticket"]
+        for ticket_id, ticket in row["changes"]["tickets"].items()
+        if matching_ticket(ticket)
+    ]
+
+    reuse_checks = []
+    no_duplicate_checks = []
+    for session_id, records in sessions.items():
+        start = records[0]
+        if start["trigger_type"] != "user_visit" or start["trigger_id"] != "V2":
+            continue
+        prior_tickets = tickets_at_start + [
+            ticket_id for row, ticket_id in creations if row["seq"] < start["seq"]
+        ]
+        reused = bool(prior_tickets) and _t9_ticket_reuse(
+            records, prior_tickets[0], user_id
+        )
+        created_here = sum(row["session_id"] == session_id for row, _ in creations)
+        no_duplicate = created_here == 0 or len(prior_tickets) + created_here <= 1
+        reuse_checks.append(reused)
+        no_duplicate_checks.append(no_duplicate)
+        stage = evaluation["stages"][session_id]
+        stage["passed"] = stage["passed"] and reused and no_duplicate
+
+    evaluation["process"].update(
+        reused_original_ticket_on_revisit=all(reuse_checks) if reuse_checks else None,
+        no_duplicate_ticket_on_revisit=all(no_duplicate_checks)
+        if no_duplicate_checks
+        else None,
+    )
+    related_tickets = _case_tickets(run["final_state"], user_id, order_id)
+    evaluation["metrics"]["duplicate_ticket_rate"] = (
+        int(len(related_tickets) > 1) if reuse_checks else None
+    )
+    evaluation["metrics"]["session_correctness"] = _rate(
+        [stage["passed"] for stage in evaluation["stages"].values()]
+    )
     return evaluation
 
 

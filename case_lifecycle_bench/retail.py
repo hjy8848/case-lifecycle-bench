@@ -5,16 +5,21 @@ from decimal import Decimal
 from importlib.metadata import version
 
 
-def retail_case(case: dict, order_id: str) -> dict:
+def load_retail_tools():
     from tau2.domains.retail.data_model import get_db
     from tau2.domains.retail.tools import RetailTools
 
     if version("tau2") != "1.0.1":
         raise ValueError("Retail fixtures require tau2 v1.0.1")
-    db = get_db()
-    if order_id not in db.orders:
+    return RetailTools(get_db())
+
+
+def retail_case(case: dict, order_id: str, *, tools=None) -> dict:
+    if tools is None:
+        tools = load_retail_tools()
+    if order_id not in tools.db.orders:
         raise ValueError(f"Unknown τ-bench Retail order: {order_id}")
-    order = RetailTools(db).get_order_details(order_id)
+    order = tools.get_order_details(order_id)
     init = case["init"]
     status = init.get("order_status", "delivered")
     if order.status != status:
