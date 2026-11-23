@@ -8,6 +8,8 @@ from datetime import datetime, timedelta
 from heapq import heappop, heappush
 from itertools import count
 
+from .industries.retail import initial_state as retail_initial_state
+
 
 _EPOCH = datetime(2026, 1, 5)
 _WORLD = 0
@@ -41,17 +43,22 @@ def _duration(value: str) -> timedelta:
     return timedelta(hours=int(match[1]))
 
 
-def run_case(case: dict, agent: Callable, *, wake: str = "poll") -> dict:
+def run_case(
+    case: dict, agent: Callable, *, wake: str = "poll", single_session: bool = False
+) -> dict:
     """Run an isolated case. The callback receives only its current trigger and tools."""
     if wake not in {"poll", "push"}:
         raise ValueError(f"Unknown wake mode: {wake!r}")
-    return _Environment(case, wake).run(agent)
+    if single_session and case["template"] != "cancel_partial_success":
+        raise ValueError("Single-session comparison requires a T3 case")
+    return _Environment(case, wake, single_session).run(agent)
 
 
 class _Environment:
-    def __init__(self, case: dict, wake: str):
+    def __init__(self, case: dict, wake: str, single_session: bool):
         self.horizon = _case_time(case["horizon"])
         self.wake = wake
+        self.single_session = single_session
         self.t = _EPOCH
         self.trace = []
         self.waiting_events = []
@@ -66,34 +73,7 @@ class _Environment:
         init = case["init"]
         self.user_id = init["user"]
         self.order_id = init["order"]
-        self.state = {
-            "users": {self.user_id: {"user_id": self.user_id}},
-            "orders": {
-                self.order_id: {
-                    "order_id": self.order_id,
-                    "user_id": self.user_id,
-                    "amount": init["amount"],
-                    "status": init.get("order_status", "delivered"),
-                }
-            },
-            "products": {},
-            "tickets": {},
-            "refunds": {},
-            "shipments": {},
-            "fulfillment": {},
-            "payment_ledger": {},
-            "followups": {},
-            "outbox": {},
-            "handoffs": {},
-        }
-        if "refund_eligibility" in init:
-            self.state["orders"][self.order_id]["refund_eligibility"] = init[
-                "refund_eligibility"
-            ]
-        for patch in init.get("db_patch", []):
-            self._patch_fulfillment(patch)
-        if self.state["fulfillment"] and "order_status" not in init:
-            self.state["orders"][self.order_id]["status"] = "pending"
+        self.state = retail_initial_state(init, _iso(self.t))
         for visit in case["visits"]:
             self._enqueue(_case_time(visit["t"]), _VISIT, visit)
         for event in case["events"]:
@@ -101,28 +81,6 @@ class _Environment:
                 self.reactive_events.append(event)
             else:
                 self._enqueue(_case_time(event["t"]), _WORLD, event)
-
-    def _patch_fulfillment(self, patch: str) -> None:
-        match = re.fullmatch(
-            r"fulfillment\[([^\[\]]+)\]\.status\s*=\s*(pending|picking|shipped|cancelled)",
-            patch,
-        )
-        if not match or match[1] not in self.state["orders"]:
-            raise ValueError(f"Unsupported initial DB patch: {patch!r}")
-        order_id, status = match.groups()
-        self.state["fulfillment"][order_id] = {
-            "order_id": order_id,
-            "status": status,
-            "cancel_synced": status == "cancelled",
-        }
-        if status == "shipped":
-            shipment_id = self._new_id("shipments", "SH")
-            self.state["shipments"][shipment_id] = {
-                "shipment_id": shipment_id,
-                "order_id": order_id,
-                "status": "in_transit",
-                "events": [{"t": _iso(self.t), "status": "in_transit"}],
-            }
 
     def _enqueue(self, t: datetime, priority: int, payload: dict) -> None:
         heappush(self.queue, (t, priority, next(self.queue_order), payload))
@@ -153,11 +111,16 @@ class _Environment:
             session, changes = self._trigger(priority, payload)
             if session is not None:
                 self._run_session(agent, f"S{next(session_index)}", session, changes)
-        return {
+                if self.single_session:
+                    break
+        run = {
             "trajectory": self.trace,
             "initial_state": initial_state,
             "final_state": self.state,
         }
+        if self.single_session:
+            run["single_session"] = True
+        return run
 
     def _trigger(self, priority: int, payload: dict) -> tuple[dict | None, dict]:
         changes = {}
@@ -193,6 +156,8 @@ class _Environment:
             knows = payload.get("knows", [])
             if "order_id" in knows or self.order_id in knows:
                 trigger["order_id"] = self.order_id
+        if self.single_session:
+            trigger["single_session"] = True
         return {"t": _iso(self.t), **deepcopy(trigger)}, changes
 
     def _visit_condition(self, condition: str | None) -> bool:
@@ -531,11 +496,16 @@ class _Environment:
                 f"agent.call({tool}, {target})",
             }:
                 self.reactive_events.remove(event)
-                self._enqueue(
-                    self.t + _duration(event["after"]),
-                    _WORLD,
-                    {**event, **context},
-                )
+                payload = {**event, **context}
+                if (
+                    self.single_session
+                    and tool == "cancel_fulfillment"
+                    and "shipments" in changes
+                    and event["op"].startswith("shipment.")
+                ):
+                    self._world_event(payload, in_session=True)
+                else:
+                    self._enqueue(self.t + _duration(event["after"]), _WORLD, payload)
 
     def _refund_event(self, event: dict) -> dict:
         match = re.fullmatch(
@@ -591,7 +561,7 @@ class _Environment:
             },
         }
 
-    def _world_event(self, event: dict) -> None:
+    def _world_event(self, event: dict, *, in_session: bool = False) -> None:
         if event["op"].startswith("shipment."):
             changes = self._shipment_event(event)
         else:
@@ -599,7 +569,10 @@ class _Environment:
         # An event with no business effect carries no realized detection duty.
         applied = bool(changes)
         notify_agent = event.get("notify_agent", False)
-        push = applied and notify_agent and self.wake == "push"
+        push = (
+            applied and notify_agent and self.wake == "push" and not self.single_session
+        )
+        observable = applied and (push or in_session)
         self._apply(changes)
         row = self._log(
             "world_event",
@@ -608,10 +581,10 @@ class _Environment:
             op=event["op"],
             notify_agent=notify_agent,
             duty=event.get("duty") if applied else None,
-            t_observable=_iso(self.t) if push else None,
+            t_observable=_iso(self.t) if observable else None,
             changes=changes,
         )
         if push:
             self._enqueue(self.t, _PUSH, event)
-        elif applied:
+        elif applied and not observable:
             self.waiting_events.append(row)

@@ -39,6 +39,11 @@ def main():
     parser.add_argument("--wake", choices=("poll", "push"), default="poll")
     parser.add_argument("--agent", default="oracle")
     parser.add_argument(
+        "--paired",
+        action="store_true",
+        help="Compare the lifecycle and single-session versions of a self-built T3 case",
+    )
+    parser.add_argument(
         "--memory",
         choices=("crm", "full-history", "ledger"),
         default="crm",
@@ -60,6 +65,43 @@ def main():
         "--expect-case-sha256", help="Refuse to run a changed case fixture"
     )
     args = parser.parse_args()
+
+    if args.paired:
+        if (
+            args.case != "t3"
+            or args.memory != "crm"
+            or args.model
+            or args.user_model
+            or args.retail_order
+            or args.expect_case_sha256
+        ):
+            parser.error(
+                "--paired requires --case t3 with scripted agents and synthetic data"
+            )
+        if args.agent not in {"oracle", "premature-refund"}:
+            parser.error("--paired supports oracle and premature-refund")
+        from .industries.retail import retail_t3_case
+        from .single_session import premature_refund_single, run_t3_pair
+
+        case = retail_t3_case()
+        options = {}
+        if args.agent == "premature-refund":
+            options = {
+                "lifecycle_agent": t3.premature_refund,
+                "single_agent": premature_refund_single,
+            }
+        pair = run_t3_pair(case, wake=args.wake, **options)
+        if not args.trace:
+            pair = {
+                mode: {"evaluation": result["evaluation"]}
+                for mode, result in pair.items()
+            }
+        print(
+            json.dumps(
+                {"case_id": case["case_id"], "agent": args.agent, **pair}, indent=2
+            )
+        )
+        return
 
     if args.memory == "ledger" and args.case not in {"t1", "t2", "t9"}:
         parser.error("--memory ledger is currently supported for T1, T2 and T9")

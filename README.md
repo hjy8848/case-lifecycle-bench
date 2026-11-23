@@ -34,6 +34,17 @@ python -m unittest discover -s tests -v
 python -m case_lifecycle_bench.pilot --seed 300 --output runs/pilot-seed300.json --trace
 ```
 
+## 自建 T3 的同题对照
+
+下列命令使用自建电商订单，不依赖 τ-bench 数据。生命周期版保留跟进和等待。单会话版在拦截请求提交后让承运商结果立即生效，仍要求查证拦截和退款状态、通知客户。
+
+```powershell
+python -m case_lifecycle_bench --case t3 --paired --trace
+python -m case_lifecycle_bench --case t3 --paired --agent premature-refund
+```
+
+两版使用相同的初始状态和业务结果判据。即时完成的核实计入履约，仍待办的跟进继续标为未履约。保险和信贷目录中的合成模板处于设计阶段，等外呼、行业状态和判据接入后再进入运行清单。
+
 ## 复现九用例记忆对照
 
 先设置实验网关的进程环境，再从上述 Pilot 固定选取 T1、T2、T9 各三个用例。在 Poll-only 下，每个用例运行三种记忆设置。保留同一个输出目录再次运行时，批次会跳过已保存的轨迹。
