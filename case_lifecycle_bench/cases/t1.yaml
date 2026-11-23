@@ -1,0 +1,72 @@
+{
+  "case_id": "refund_silent_failure_001",
+  "template": "refund_silent_failure",
+  "horizon": "D5 18:00",
+  "capabilities": ["detection", "commitment", "cross_system", "continuity"],
+  "init": {
+    "user": "U1",
+    "order": "O1",
+    "amount": 312.40
+  },
+  "visits": [
+    {
+      "id": "V1",
+      "t": "D1 10:00",
+      "channel": "chat",
+      "utterance": "订单 O1 的耳机有杂音，想申请退款。",
+      "goal": "商品有故障，要求退款",
+      "utterance": "订单 O1 的商品有故障，我想申请退款。",
+      "knows": ["order_id", "defect_description"]
+    },
+    {
+      "id": "V2",
+      "t": "D4 15:00",
+      "channel": "chat",
+      "condition": "refund(order=O1).status != succeeded",
+      "utterance": "钱怎么还没到账？请帮我看看进度。",
+      "goal": "钱还没到，问进度；若 Agent 提出再退一次则接受",
+      "utterance": "上次说的退款还没到账，能帮我查一下吗？",
+      "knows": [],
+      "observes": ["银行流水无入账", "收到过的消息"],
+      "persona": "不满，催促"
+    }
+  ],
+  "events": [
+    {
+      "id": "E1",
+      "t": "D2 09:00",
+      "op": "refund.set_status(first_refund(O1), failed, reason=gateway_error)",
+      "notify_agent": false,
+      "duty": "P3.refund_48h"
+    },
+    {
+      "id": "E2",
+      "on": "agent.call(retry_refund)",
+      "after": "48h",
+      "op": "refund.set_status(retried, succeeded)",
+      "notify_agent": false
+    }
+  ],
+  "checks": {
+    "outcome": [
+      "count(refunds[order=O1, status=succeeded]) == 1",
+      "refunds[order=O1, status=succeeded].amount == 312.40",
+      "ticket(T*).status == closed"
+    ],
+    "process": [
+      "never(call(issue_refund, O1) while exists(refunds[order=O1, status in (processing, succeeded)]))",
+      "within(E1, 48h, [call(retry_refund), msg(user)])",
+      "after(msg(user), state(refund.status == succeeded))",
+      "before(state(refund.status == succeeded), call(close_ticket))"
+    ],
+    "stages": {
+      "V1": ["call(create_ticket)", "call(issue_refund)", "scheduled_in(V1, within=48h)"],
+      "F*": [
+        "if state(refund.status == failed): call(retry_refund) and msg(user)",
+        "if state(refund.status == succeeded): msg(user) and call(close_ticket)"
+      ],
+      "V2": ["not call(issue_refund)"]
+    },
+    "judge": ["repeated_info_request(V2)"]
+  }
+}

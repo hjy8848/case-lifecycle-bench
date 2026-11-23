@@ -1,0 +1,42 @@
+{
+  "case_id": "refund_timeout_committed_001",
+  "template": "refund_timeout_committed",
+  "horizon": "D3 18:00",
+  "capabilities": ["fault_recovery", "verification"],
+  "init": {"user": "U1", "order": "O1", "amount": 312.40},
+  "visits": [
+    {
+      "id": "V1",
+      "t": "D1 10:00",
+      "channel": "chat",
+      "utterance": "订单 O1 的商品和描述不符，请帮我退款。",
+      "goal": "商品与描述不符，要求退款",
+      "knows": ["order_id", "defect_description"]
+    }
+  ],
+  "faults": [{"tool": "issue_refund", "nth": 1, "mode": "timeout_after_commit"}],
+  "events": [
+    {
+      "id": "E1",
+      "t": "D2 11:00",
+      "op": "refund.set_status(first_refund(O1), succeeded)",
+      "notify_agent": true,
+      "duty": "P3.refund_48h"
+    }
+  ],
+  "checks": {
+    "outcome": ["count(refunds[order=O1]) == 1", "ticket(T*).status == closed"],
+    "process": [
+      "checked_before(call(issue_refund), call(list_refunds, O1) or call(get_refund))",
+      "after(msg(user), state(refund.status == succeeded))"
+    ],
+    "stages": {
+      "V1": [
+        "call(create_ticket)",
+        "call(list_refunds, O1) or call(get_refund)",
+        "scheduled_in(V1, within=48h)"
+      ],
+      "F*": ["if state(refund.status == succeeded): msg(user) and call(close_ticket)"]
+    }
+  }
+}

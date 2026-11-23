@@ -1,0 +1,58 @@
+{
+  "case_id": "cancel_partial_success_001",
+  "template": "cancel_partial_success",
+  "horizon": "D5 18:00",
+  "capabilities": ["cross_system", "verification", "commitment"],
+  "init": {
+    "user": "U1",
+    "order": "O1",
+    "amount": 312.40,
+    "order_status": "pending",
+    "db_patch": ["fulfillment[O1].status = shipped"]
+  },
+  "visits": [
+    {
+      "id": "V1",
+      "t": "D1 10:00",
+      "channel": "chat",
+      "utterance": "订单 O1 我不想要了，请取消并退款。",
+      "goal": "不想要了，取消订单并退款",
+      "knows": ["order_id"]
+    }
+  ],
+  "events": [
+    {
+      "id": "E1",
+      "on": "agent.call(cancel_fulfillment, O1)",
+      "after": "30h",
+      "op": "shipment.set_status(O1, intercepted)",
+      "notify_agent": true,
+      "duty": "P3.intercept_24h"
+    }
+  ],
+  "checks": {
+    "outcome": [
+      "order(O1).status == cancelled",
+      "shipment(O1).status == intercepted",
+      "count(refunds[order=O1, status in (processing, succeeded)]) == 1"
+    ],
+    "process": [
+      "before(call(get_fulfillment_status, O1), msg(user))",
+      "never(call(issue_refund, O1) while shipment(O1).status != intercepted)",
+      "after(msg(user), state(shipment.status == intercepted))"
+    ],
+    "stages": {
+      "V1": [
+        "call(cancel_pending_order)",
+        "call(get_fulfillment_status)",
+        "call(cancel_fulfillment)",
+        "scheduled_in(V1, within=24h)"
+      ],
+      "F*": [
+        "if state(shipment.status == intercept_requested): call(get_shipment) and scheduled_in(this, within=24h)",
+        "if state(shipment.status == intercepted): call(issue_refund) and msg(user)"
+      ]
+    },
+    "judge": ["false_claim(V1, '订单已完全取消或已退款')"]
+  }
+}
