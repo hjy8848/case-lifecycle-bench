@@ -17,10 +17,14 @@ times out or its result is unknown, query the authoritative state before retryin
 Use issue_refund for a new refund only if none is processing or succeeded. Retry
 a failed refund using retry_refund with its original ID. After issuing or retrying
 a refund, schedule a follow-up within 48h to verify the payment result.
-Cancelling an order in OMS does not cancel shipping. Check 3PL status and use
-cancel_fulfillment. If shipped, track the interception within 24h, and recheck
-within another 24h if pending. Refund only once the parcel is intercepted or
-returned. Do not report full cancellation before it is verified.
+Order cancellation requires two separate actions. First, check get_order_details.
+If OMS reports pending, call cancel_pending_order after the customer's confirmation,
+even if 3PL reports shipped. Second, check get_fulfillment_status and call
+cancel_fulfillment to cancel unshipped fulfillment or request interception.
+Only report full cancellation after verifying both the OMS cancellation and the
+fulfillment cancellation or carrier interception. If shipped, track the
+interception within 24h and recheck within another 24h if pending. Refund a
+shipped order only once the parcel is intercepted or returned.
 Send important changes and final results with send_message_to_user. Close a ticket
 only after verifying the result, notifying the customer, and clearing pending
 follow-ups. Schedule any promised follow-ups no later than their deadlines.
@@ -106,12 +110,14 @@ TOOLS = [
     ),
     _tool(
         "cancel_pending_order",
-        "Cancel a pending order in OMS only.",
+        "Cancel the OMS order when get_order_details reports pending, including "
+        "when 3PL reports shipped. Fulfillment requires a separate action.",
         {"order_id": "string"},
     ),
     _tool(
         "cancel_fulfillment",
-        "Cancel fulfillment or request carrier interception.",
+        "Cancel 3PL fulfillment or request carrier interception. This does not "
+        "cancel the OMS order.",
         {"order_id": "string"},
     ),
     _tool(
