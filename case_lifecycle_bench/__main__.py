@@ -146,6 +146,8 @@ def main():
             "temperature": 0,
             "model_calls": gateway.calls
             + (user_gateway.calls if user_gateway is not gateway else 0),
+            "model_retries": gateway.retries
+            + (user_gateway.retries if user_gateway is not gateway else 0),
         }
         if user_gateway is not gateway:
             result["meta"]["user_api_base"] = user_gateway.api_base

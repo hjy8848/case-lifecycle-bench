@@ -2,8 +2,14 @@
 
 import json
 import re
+import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
+
+# Transient gateway failures are retried with exponential backoff. A retry repeats
+# only the model request; no tool has run yet, so it cannot duplicate a write.
+_RETRY_STATUS = {408, 429, 500, 502, 503, 504}
+_RETRY_DELAYS = (2, 4, 8, 16, 32)
 
 
 POLICY = """You are a retail support agent. The context starts fresh with each wake.
@@ -157,6 +163,7 @@ class ChatGateway:
         self.key = key
         self.enable_thinking = enable_thinking
         self.calls = 0
+        self.retries = 0
 
     def reply(self, model, messages, tools=None):
         body = {
@@ -178,17 +185,25 @@ class ChatGateway:
             headers=headers,
         )
         self.calls += 1
-        try:
-            with urlopen(request, timeout=120) as response:
-                return json.load(response)["choices"][0]["message"]
-        except HTTPError as error:
-            raise RuntimeError(
-                f"Chat completion failed with HTTP {error.code}"
-            ) from None
-        except (URLError, TimeoutError) as error:
-            raise RuntimeError(
-                f"Chat completion failed: {type(error).__name__}"
-            ) from None
+        for attempt in range(len(_RETRY_DELAYS) + 1):
+            try:
+                with urlopen(request, timeout=120) as response:
+                    return json.load(response)["choices"][0]["message"]
+            except HTTPError as error:
+                if error.code not in _RETRY_STATUS or attempt == len(_RETRY_DELAYS):
+                    raise RuntimeError(
+                        f"Chat completion failed with HTTP {error.code}"
+                    ) from None
+                failure = f"HTTP {error.code}"
+            except (URLError, TimeoutError, ConnectionError) as error:
+                if attempt == len(_RETRY_DELAYS):
+                    raise RuntimeError(
+                        f"Chat completion failed: {type(error).__name__}"
+                    ) from None
+                failure = type(error).__name__
+            self.retries += 1
+            time.sleep(_RETRY_DELAYS[attempt])
+        raise RuntimeError(f"Chat completion failed: {failure}")
 
 
 def _customer_reply(gateway, model, visit, dialogue):
