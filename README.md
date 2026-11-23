@@ -22,7 +22,7 @@ python -m unittest discover -s tests -v
 
 模型入口接受 `--model` 和可选的 `--user-model`，从进程环境读取 `CASE_LIFECYCLE_API_BASE` 和 `CASE_LIFECYCLE_API_KEY`。
 
-`--memory crm` 是默认设置。使用 `--memory full-history` 可以在唤醒时提供之前的可见对话和工具记录。T1 还支持 `--memory ledger`，唤醒时提供结构化待办，并检查重复退款和关单条件。被拦截的动作在 `ledger_guard_events` 中单独记录。
+`--memory crm` 是默认设置。使用 `--memory full-history` 可以在唤醒时提供之前的可见对话和工具记录。T1、T2、T9 支持 `--memory ledger`，唤醒时提供结构化待办，并检查重复退款和关单条件。被拦截的动作在 `ledger_guard_events` 中单独记录。
 
 ## 生成 Pilot 用例
 
@@ -30,6 +30,18 @@ python -m unittest discover -s tests -v
 
 ```powershell
 python -m case_lifecycle_bench.pilot --seed 300 --output runs/pilot-seed300.json --trace
+```
+
+## 复现九用例记忆对照
+
+先设置实验网关的进程环境，再从上述 Pilot 固定选取 T1、T2、T9 各三个用例。在 Poll-only 下，每个用例运行三种记忆设置。保留同一个输出目录再次运行时，批次会跳过已保存的轨迹。
+
+```powershell
+python -m case_lifecycle_bench.panel --pilot runs/pilot-seed300.json |
+    Set-Content -Encoding utf8NoBOM runs/panel-seed300.json
+python -m case_lifecycle_bench.panel_run --panel runs/panel-seed300.json --output runs/memory-panel --model qwen3.6-plus --workers 4
+$traces = (Get-ChildItem -LiteralPath runs/memory-panel -Filter '*--*.json').FullName
+python -m case_lifecycle_bench.compare --panel runs/panel-seed300.json $traces
 ```
 
 ## 项目状态
