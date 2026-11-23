@@ -4,6 +4,9 @@ import argparse
 import json
 from collections import Counter, defaultdict
 from pathlib import Path
+from statistics import median
+
+from .eval_checks import duty_detection_times
 
 _REVIEW_STATUSES = {
     "pending_review",
@@ -39,11 +42,13 @@ def _read(path):
 
 def _metrics(run):
     metrics = run["evaluation"]["metrics"]
+    trajectory = run["run"]["trajectory"]
     exposure = Counter(
         row.get("channel")
-        for row in run["run"]["trajectory"]
+        for row in trajectory
         if row["kind"] == "session_start" and row["trigger_type"] == "user_visit"
     )
+    conversations = sum(exposure.values())
     conversation_success = metrics.get("conversation_success")
     case_resolution = metrics.get("case_resolution")
     return {
@@ -51,8 +56,10 @@ def _metrics(run):
         "case_resolution": case_resolution,
         "detection_rate": metrics.get("detection_rate"),
         "h1_gap": _gap(conversation_success, case_resolution),
-        "conversations": sum(exposure.values()),
+        "conversations": conversations,
+        "user_revisits": max(conversations - 1, 0),
         "conversations_by_channel": dict(exposure),
+        "duty_events": duty_detection_times(trajectory),
     }
 
 
@@ -90,6 +97,8 @@ def _case_comparison(case, by_key, wakes, trials):
             if poll["h1_gap"] is not None and push["h1_gap"] is not None
             else None,
             "h2_push_minus_poll": _gap(push["detection_rate"], poll["detection_rate"]),
+            "user_revisits_poll_minus_push": poll["user_revisits"]
+            - push["user_revisits"],
         }
         for trial in trials
         if (poll := indexed["poll"].get(trial)) is not None
@@ -126,6 +135,14 @@ def _cohort(rows):
             "n_trials": sum(stats["n"] for stats in summaries),
         }
 
+    wake_trials = {
+        wake: [trial for row in rows for trial in row["by_wake"][wake]["trials"]]
+        for wake in ("poll", "push")
+    }
+    revisit_totals = {
+        wake: sum(row["user_revisits"] for row in trials)
+        for wake, trials in wake_trials.items()
+    }
     return {
         "h1_by_wake": {
             wake: {
@@ -149,7 +166,36 @@ def _cohort(rows):
             wake: collect([row["by_wake"][wake]["detection_rate"] for row in rows])
             for wake in ("poll", "push")
         },
+        "detection_delay_by_wake": {
+            wake: _detection_delays(trials) for wake, trials in wake_trials.items()
+        },
+        "user_revisits_by_wake": {
+            wake: {"total": revisit_totals[wake], "n_trials": len(trials)}
+            for wake, trials in wake_trials.items()
+        },
+        "paired_user_revisits_poll_minus_push": sum(
+            pair["user_revisits_poll_minus_push"]
+            for row in rows
+            for pair in row["pairs"]
+        ),
     }
+
+
+def _detection_delays(trials):
+    events = [event for trial in trials for event in trial["duty_events"]]
+    return {
+        "realized_events": len(events),
+        **{
+            name: _delay_stats(
+                [event[name] for event in events if event[name] is not None]
+            )
+            for name in ("event_to_detection_hours", "opportunity_to_detection_hours")
+        },
+    }
+
+
+def _delay_stats(values):
+    return {**_stats(values), "median": median(values) if values else None}
 
 
 def summarize_smoke(runs, manifest, *, simulator_reviews=()):

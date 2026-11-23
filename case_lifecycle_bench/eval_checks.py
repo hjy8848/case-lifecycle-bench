@@ -140,3 +140,74 @@ def event_observation(trajectory, event_id, queries, deadline_delta):
         ),
         None,
     )
+
+
+def duty_detection_times(trajectory):
+    """Locate the first authoritative read that exposes each realized duty event."""
+    reads = (record for record in trajectory if record["kind"] == "tool_call")
+    by_tool = defaultdict(list)
+    for record in reads:
+        by_tool[record["tool"]].append(record)
+    refund_reads = sorted(
+        by_tool["get_refund"] + by_tool["list_refunds"], key=lambda row: row["seq"]
+    )
+    shipment_reads = by_tool["get_shipment"]
+    detections = []
+    for event in trajectory:
+        if event["kind"] != "world_event" or not event.get("duty"):
+            continue
+        changes = event.get("changes", {})
+        refunds = changes.get("refunds", {})
+        shipments = changes.get("shipments", {})
+        observed = None
+        if refunds:
+            order_ids = {row["order_id"] for row in refunds.values()}
+            observed = next(
+                (
+                    query
+                    for query in refund_reads
+                    if query["seq"] > event["seq"]
+                    and any(
+                        row["refund_id"] in refunds
+                        and row["status"] == refunds[row["refund_id"]]["status"]
+                        for order_id in order_ids
+                        for row in refund_query(query, order_id)
+                    )
+                ),
+                None,
+            )
+        elif shipments:
+            observed = next(
+                (
+                    query
+                    for query in shipment_reads
+                    if query["seq"] > event["seq"]
+                    and isinstance(query.get("result"), dict)
+                    and query["result"].get("shipment_id") in shipments
+                    and query["result"].get("status")
+                    == shipments[query["result"]["shipment_id"]]["status"]
+                ),
+                None,
+            )
+        occurred_at = record_time(event)
+        detected_at = record_time(observed) if observed is not None else None
+        observable = event.get("t_observable")
+        opportunity = datetime.fromisoformat(observable) if observable else None
+        detections.append(
+            {
+                "event_id": event["event_id"],
+                "event_seq": event["seq"],
+                "query_seq": observed["seq"] if observed is not None else None,
+                "event_to_detection_hours": (
+                    (detected_at - occurred_at).total_seconds() / 3600
+                    if detected_at is not None
+                    else None
+                ),
+                "opportunity_to_detection_hours": (
+                    (detected_at - opportunity).total_seconds() / 3600
+                    if detected_at is not None and opportunity is not None
+                    else None
+                ),
+            }
+        )
+    return detections
