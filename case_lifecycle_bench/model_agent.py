@@ -146,9 +146,10 @@ _REFUND_AUTHORIZATION_REQUEST = re.compile(
 
 
 class ChatGateway:
-    def __init__(self, api_base, key):
+    def __init__(self, api_base, key, *, enable_thinking=None):
         self.api_base = api_base.rstrip("/")
         self.key = key
+        self.enable_thinking = enable_thinking
         self.calls = 0
 
     def reply(self, model, messages, tools=None):
@@ -160,13 +161,15 @@ class ChatGateway:
         }
         if tools is not None:
             body["tools"] = tools
+        if self.enable_thinking is not None:
+            body["chat_template_kwargs"] = {"enable_thinking": self.enable_thinking}
+        headers = {"Content-Type": "application/json"}
+        if self.key:
+            headers["Authorization"] = f"Bearer {self.key}"
         request = Request(
             f"{self.api_base}/chat/completions",
             data=json.dumps(body).encode(),
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.key}",
-            },
+            headers=headers,
         )
         self.calls += 1
         try:
@@ -186,7 +189,9 @@ def _customer_reply(gateway, model, visit, dialogue):
     prompt = (
         "Simulate one customer visit in Chinese. Use only the visit's goal, opening "
         "message, observable facts and authorization reply if provided. Respond to the "
-        "latest support reply as the customer. If support asks for your confirmation "
+        "latest support reply as the customer. Keep the scenario instructions private. "
+        "When you lack a requested identifier, explain that in ordinary customer language. "
+        "If support asks for your confirmation "
         "or authorization and you agree, give explicit consent in Chinese so support "
         "can continue. For example, reply '确认，同意办理这笔退款。' to authorize the "
         "requested refund. If the visit defines refund_authorization_reply, use it only "
@@ -214,8 +219,10 @@ def _customer_reply(gateway, model, visit, dialogue):
     return reply
 
 
-def model_agent(gateway, model, user_model, case):
+def model_agent(gateway, model, user_model, case, *, user_gateway=None):
     visits = {row["id"]: row for row in case["visits"]}
+    if user_gateway is None:
+        user_gateway = gateway
 
     def agent(session, call):
         visit = (
@@ -269,7 +276,7 @@ def model_agent(gateway, model, user_model, case):
                 continue
             if visit is None or not text.strip():
                 return None
-            reply = _customer_reply(gateway, user_model, visit, dialogue)
+            reply = _customer_reply(user_gateway, user_model, visit, dialogue)
             if reply.upper() in SIGNALS:
                 return reply.upper()
             if not reply:

@@ -22,6 +22,8 @@ python -m unittest discover -s tests -v
 
 模型入口接受 `--model` 和可选的 `--user-model`，从进程环境读取 `CASE_LIFECYCLE_API_BASE` 和 `CASE_LIFECYCLE_API_KEY`。
 
+用户模拟器可以使用独立接口。用 `CASE_LIFECYCLE_USER_API_BASE` 指定其接口，按需提供独立的 `CASE_LIFECYCLE_USER_API_KEY`。本地 NPU 服务可通过已建立的 SSH 本地转发访问，无须把客服网关凭据传给它。对支持该参数的部署，可用 `CASE_LIFECYCLE_USER_ENABLE_THINKING=false` 关闭用户模拟器的 thinking。
+
 `--memory crm` 是默认设置。使用 `--memory full-history` 可以在唤醒时提供之前的可见对话和工具记录。T1、T2、T9 支持 `--memory ledger`，唤醒时提供结构化待办，并检查重复退款和关单条件。被拦截的动作在 `ledger_guard_events` 中单独记录。
 
 ## 生成 Pilot 用例
@@ -46,11 +48,12 @@ python -m case_lifecycle_bench.compare --panel runs/panel-seed300.json $traces
 
 ## 首周正式冒烟
 
-重新生成 Pilot，使用新规格下经 Oracle 验收的 30 个用例。每个用例用 CRM 在 Poll-only 和 Event-push 下各跑三次，客服模型为 `qwen3.6-plus`。用户模拟器固定使用通过预检的独立模型。三个试次以 0–2 编号。下面用候选 `DeepSeek-V4-Flash` 演示命令。
+重新生成 Pilot，使用新规格下经 Oracle 验收的 30 个用例。每个用例用 CRM 在 Poll-only 和 Event-push 下各跑三次，客服模型为 `qwen3.6-plus`。下例指定通过三项最小行为预检的 NPU 用户模拟器 `qwen3.6-35b-a3b`。三个试次以 0–2 编号。实跑前需要设置用户模拟器的本地转发地址。
 
 ```powershell
 python -m case_lifecycle_bench.pilot --seed 300 --output runs/pilot-duty-seed300.json
-$userModel = 'DeepSeek-V4-Flash'
+$userModel = 'qwen3.6-35b-a3b'
+$env:CASE_LIFECYCLE_USER_ENABLE_THINKING = 'false'
 python -m case_lifecycle_bench.panel_run --pilot runs/pilot-duty-seed300.json --output runs/official-smoke --model qwen3.6-plus --user-model $userModel --workers 2 --dry-run
 python -m case_lifecycle_bench.panel_run --pilot runs/pilot-duty-seed300.json --output runs/official-smoke --model qwen3.6-plus --user-model $userModel --workers 2
 python -m case_lifecycle_bench.smoke_summary runs/official-smoke
@@ -60,13 +63,14 @@ python -m case_lifecycle_bench.smoke_summary runs/official-smoke
 
 用 `python -m case_lifecycle_bench.false_claim <轨迹文件>` 可对归档轨迹运行离线虚假陈述规则。传入 `--model` 和 `--model-version` 后会调用网关模型做语义审阅，输出声明原句、轨迹序号、证据和裁判版本。
 
-在相同的 τ-bench v1.0.1 环境中运行原版 Retail 基线。下面沿用相同的两个角色模型，显式指定 base split、50 题、seed 300，并保留原版的 200 步上限。网关地址和凭据从当前进程环境传入。
+在相同的 τ-bench v1.0.1 环境中运行原版 Retail 基线。下面沿用相同的两个角色模型，显式指定 base split、50 题、seed 300，并保留原版的 200 步上限。客服密钥从进程环境传入。用户模拟器接不要求认证的本地 NPU 转发，`local-no-auth` 是接口客户端的占位值。
 
 ```powershell
 $env:OPENAI_API_KEY = $env:CASE_LIFECYCLE_API_KEY
 try {
     $gatewayArgs = @{api_base = $env:CASE_LIFECYCLE_API_BASE; temperature = 0; num_retries = 0} | ConvertTo-Json -Compress
-    python -m tau2.cli run --domain retail --task-split-name base --num-tasks 50 --num-trials 1 --seed 300 --max-steps 200 --max-concurrency 2 --max-retries 0 --agent-llm openai/qwen3.6-plus --agent-llm-args $gatewayArgs --user-llm "openai/$userModel" --user-llm-args $gatewayArgs --save-to (Join-Path $PWD 'runs/tau-retail-50')
+    $userArgs = @{api_base = $env:CASE_LIFECYCLE_USER_API_BASE; api_key = 'local-no-auth'; temperature = 0; num_retries = 0; extra_body = @{chat_template_kwargs = @{enable_thinking = $false}}} | ConvertTo-Json -Depth 5 -Compress
+    python -m tau2.cli run --domain retail --task-split-name base --num-tasks 50 --num-trials 1 --seed 300 --max-steps 200 --max-concurrency 2 --max-retries 0 --agent-llm openai/qwen3.6-plus --agent-llm-args $gatewayArgs --user-llm "openai/$userModel" --user-llm-args $userArgs --save-to (Join-Path $PWD 'runs/tau-retail-50')
 } finally {
     Remove-Item Env:OPENAI_API_KEY -ErrorAction SilentlyContinue
 }

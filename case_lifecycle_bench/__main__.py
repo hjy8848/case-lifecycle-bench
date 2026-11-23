@@ -74,6 +74,7 @@ def main():
     if args.expect_case_sha256 and args.expect_case_sha256 != case_hash:
         parser.error("Case differs from the pilot artifact; regenerate the pilot")
     gateway = None
+    user_gateway = None
     if args.user_model and not args.model:
         parser.error("--user-model requires --model")
     if args.model and args.agent != "oracle":
@@ -86,7 +87,29 @@ def main():
                 "--model requires CASE_LIFECYCLE_API_BASE and CASE_LIFECYCLE_API_KEY"
             )
         gateway = ChatGateway(base, key)
-        agent = model_agent(gateway, args.model, args.user_model or args.model, case)
+        user_base = os.environ.get("CASE_LIFECYCLE_USER_API_BASE")
+        user_thinking = os.environ.get("CASE_LIFECYCLE_USER_ENABLE_THINKING")
+        if user_thinking not in (None, "true", "false"):
+            parser.error("CASE_LIFECYCLE_USER_ENABLE_THINKING must be true or false")
+        user_gateway = gateway
+        if user_base or user_thinking is not None:
+            user_key = (
+                os.environ.get("CASE_LIFECYCLE_USER_API_KEY") if user_base else key
+            )
+            user_gateway = ChatGateway(
+                user_base or base,
+                user_key,
+                enable_thinking=(user_thinking == "true")
+                if user_thinking is not None
+                else None,
+            )
+        agent = model_agent(
+            gateway,
+            args.model,
+            args.user_model or args.model,
+            case,
+            user_gateway=user_gateway,
+        )
     else:
         if args.agent not in agents:
             parser.error(f"agents for {args.case}: {', '.join(agents)}")
@@ -121,8 +144,12 @@ def main():
             }[args.memory],
             "case_sha256": case_hash,
             "temperature": 0,
-            "model_calls": gateway.calls,
+            "model_calls": gateway.calls
+            + (user_gateway.calls if user_gateway is not gateway else 0),
         }
+        if user_gateway is not gateway:
+            result["meta"]["user_api_base"] = user_gateway.api_base
+            result["meta"]["user_enable_thinking"] = user_gateway.enable_thinking
     if args.trace:
         result["run"] = run
     if ledger is not None:

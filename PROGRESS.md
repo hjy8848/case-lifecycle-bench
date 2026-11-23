@@ -1,6 +1,6 @@
 # CaseLifecycleBench 工作进度
 
-**Status** 正式冒烟已完成规格修正和 Oracle 预检，独立用户模拟器待验收
+**Status** 正式冒烟已完成规格修正、Oracle 验收和用户模拟器最小预检
 
 **Owner** [@hjy8848](https://github.com/hjy8848)
 
@@ -71,7 +71,7 @@
 
 - 带 `duty` 的事件设置为 `notify_agent: true`。Poll-only 仍只由回访或跟进唤醒；Event-push 可以由事件立即唤醒。T9 回访改到退款结算前，确保两种模式都覆盖跨渠道续接。按新规格重生成的 30 个用例通过 60/60 条 Oracle 轨迹。
 - H1 看 Conversation Success 与 Case Resolution 的落差，H2 看 Event-push 与 Poll-only 的 Detection Rate 差值。固定 CRM、同一批 30 个用例和 `qwen3.6-plus` 客服模型，两种模式各跑三个重复试次。将按场景和唤醒模式列明分母，并单列用户模拟器导致的失败。
-- 用户模拟器固定使用独立模型。候选 `DeepSeek-V4-Flash` 先验证能否正确授权、尊重回访时可见的信息、识别对话是否结束。候选尚未定为正式配置。
+- NPU 部署的 `qwen3.6-35b-a3b` 作为本轮用户模拟器候选，客服仍为 `qwen3.6-plus`。两者为同系列的不同部署。用户模拟器关闭 thinking，temperature 0，输出上限 768 tokens。现有提示词的三项最小预检通过：T2 明确授权、T9 回访时不编造内部编号、T2 确认到账后正确结束。默认 thinking 下有两项因长度限制未返回正文。
 - 正式冒烟的离线运行清单已验证为 180 条。原版 τ-bench Retail v1.0.1 的 base split 有 114 道可选任务，可按 seed 300 跑 50 道基线。两批真实模型实验待启动。
 - 评测已拆出可复用的轨迹和业务检查，80 条轨迹与重构前的评分逐字段一致。H1/H2 汇总按用例和试次配对。用户模拟器归因使用单独审阅的标签。虚假陈述检查已在旧 T2 轨迹中抓到「退货标签已发送」但缺少执行的声明，模型裁判还待实测。
 

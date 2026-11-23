@@ -187,6 +187,10 @@ def main():
             wakes=list(SMOKE_WAKES),
             trials=SMOKE_TRIALS,
         )
+    user_base = os.environ.get("CASE_LIFECYCLE_USER_API_BASE")
+    user_thinking = os.environ.get("CASE_LIFECYCLE_USER_ENABLE_THINKING")
+    if user_base or user_thinking is not None:
+        manifest.update(user_api_base=user_base, user_enable_thinking=user_thinking)
 
     planned = []
     seen = set()
