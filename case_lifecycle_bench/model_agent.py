@@ -1,6 +1,7 @@
 """OpenAI-compatible chat agent and customer simulator for the lifecycle pilot."""
 
 import json
+import re
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -137,6 +138,11 @@ TOOLS = [
 ]
 TOOL_NAMES = {item["function"]["name"] for item in TOOLS}
 SIGNALS = {"CONFIRMED", "LEFT", "UNRESOLVED"}
+_REFUND_AUTHORIZATION_REQUEST = re.compile(
+    r"(?:^|[。！？!?\n])\s*(?:请(?:问)?您?(?:是否)?|您?是否)(?:确认|同意)"
+    r"(?:您|是否|同意|为您|为该订单|办理|发起|提交|申请|这笔|该笔|全额|\s)*退款"
+    r"\s*(?:[¥￥$]\s*[\d,.]+|[\d,.]+\s*元)?\s*(?:吗|么)?\s*(?=$|[。！？!?\n])"
+)
 
 
 class ChatGateway:
@@ -179,8 +185,13 @@ class ChatGateway:
 def _customer_reply(gateway, model, visit, dialogue):
     prompt = (
         "Simulate one customer visit in Chinese. Use only the visit's goal, opening "
-        "message and observable facts. Respond to the latest support reply as the "
-        "customer. If the conversation is over, instead return exactly one token: "
+        "message, observable facts and authorization reply if provided. Respond to the "
+        "latest support reply as the customer. If support asks for your confirmation "
+        "or authorization and you agree, give explicit consent in Chinese so support "
+        "can continue. For example, reply '确认，同意办理这笔退款。' to authorize the "
+        "requested refund. If the visit defines refund_authorization_reply, use it only "
+        "to authorize that refund. A terminal token never grants authorization. Return "
+        "exactly one token only when you are ending the conversation: "
         "CONFIRMED (satisfied), LEFT (leave with no further request), or "
         "UNRESOLVED (dissatisfied or asking for human help). Visit: "
         + json.dumps(visit, ensure_ascii=False)
@@ -192,7 +203,15 @@ def _customer_reply(gateway, model, visit, dialogue):
             {"role": "user", "content": json.dumps(dialogue, ensure_ascii=False)},
         ],
     )
-    return (response.get("content") or "").strip().strip("#").strip()
+    reply = (response.get("content") or "").strip().strip("#").strip()
+    authorization = visit.get("refund_authorization_reply")
+    if (
+        reply.upper() == "CONFIRMED"
+        and authorization
+        and _REFUND_AUTHORIZATION_REQUEST.search(dialogue[-1]["agent"])
+    ):
+        return authorization
+    return reply
 
 
 def model_agent(gateway, model, user_model, case):

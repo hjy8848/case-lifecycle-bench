@@ -13,7 +13,6 @@
       "id": "V1",
       "t": "D1 10:00",
       "channel": "chat",
-      "utterance": "订单 O1 的耳机有杂音，想申请退款。",
       "goal": "商品有故障，要求退款",
       "utterance": "订单 O1 的商品有故障，我想申请退款。",
       "knows": ["order_id", "defect_description"]
@@ -23,7 +22,6 @@
       "t": "D4 15:00",
       "channel": "chat",
       "condition": "refund(order=O1).status != succeeded",
-      "utterance": "钱怎么还没到账？请帮我看看进度。",
       "goal": "钱还没到，问进度；若 Agent 提出再退一次则接受",
       "utterance": "上次说的退款还没到账，能帮我查一下吗？",
       "knows": [],

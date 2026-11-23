@@ -397,6 +397,61 @@ def _evaluation_result(
     }
 
 
+def _t2_evidence(trajectory, order_id, issue_calls, timeout, refund_ids):
+    """Identify the realized incident and the first refund-related response."""
+    committed_timeout = next(
+        (
+            row
+            for row in issue_calls
+            if row["fault"] == "timeout_after_commit"
+            and row["result"] == {"error": "timeout"}
+            and row["committed"]
+            and row.get("changes", {}).get("refunds")
+        ),
+        None,
+    )
+    event = next((row for row in trajectory if row.get("event_id") == "E1"), None)
+    evidence = {
+        "timeout_after_commit": None,
+        "refund_settlement_event": None,
+        "first_relevant_action_after_timeout": None,
+    }
+    if committed_timeout is not None:
+        evidence["timeout_after_commit"] = {
+            key: committed_timeout[key] for key in ("seq", "t", "session_id", "tool")
+        } | {"refund_ids": list(committed_timeout["changes"]["refunds"])}
+    if event is not None:
+        succeeded = [
+            refund_id
+            for refund_id, refund in event.get("changes", {}).get("refunds", {}).items()
+            if refund["order_id"] == order_id and refund["status"] == "succeeded"
+        ]
+        evidence["refund_settlement_event"] = {
+            key: event[key] for key in ("seq", "t", "event_id", "t_observable")
+        } | {"refund_ids": succeeded}
+    if timeout is None:
+        return evidence
+
+    order_queries = {"list_refunds", "get_payment_ledger"}
+    id_tools = {"get_refund", "retry_refund"}
+    writes = {"issue_refund", "retry_refund"}
+    for row in trajectory:
+        if row["kind"] != "tool_call" or row["seq"] <= timeout["seq"]:
+            continue
+        tool, args = row["tool"], row["args"]
+        order_matches = (
+            tool in order_queries | {"issue_refund"}
+            and args.get("order_id") == order_id
+        )
+        id_matches = tool in id_tools and args.get("refund_id") in refund_ids
+        if order_matches or id_matches:
+            evidence["first_relevant_action_after_timeout"] = {
+                key: row[key] for key in ("seq", "t", "session_id", "tool", "committed")
+            } | {"action": "write" if tool in writes else "query"}
+            break
+    return evidence
+
+
 def evaluate_t2(case: dict, run: dict) -> dict:
     """Check state verification and idempotency after an ambiguous timeout."""
     order_id = case["init"]["order"]
@@ -422,6 +477,9 @@ def evaluate_t2(case: dict, run: dict) -> dict:
     committed_issues = [row for row in issues if row["committed"]]
     timeout = next(
         (row for row in issues if row.get("result") == {"error": "timeout"}), None
+    )
+    evidence = _t2_evidence(
+        trajectory, order_id, issues, timeout, {row["refund_id"] for row in refunds}
     )
     queries = [
         (row, _refund_query(row, order_id))
@@ -483,6 +541,10 @@ def evaluate_t2(case: dict, run: dict) -> dict:
     ]
     process = {
         "timeout_verified": timeout_verified,
+        "timeout_after_commit_triggered": evidence["timeout_after_commit"] is not None,
+        "refund_settlement_applied": bool(
+            (evidence["refund_settlement_event"] or {}).get("refund_ids")
+        ),
         "checked_before_repeat_issue": all(repeat_checks),
         "no_duplicate_refund": len(refunds) <= 1,
         "initial_followup_scheduled": bool(monitoring) and monitoring[0][0],
@@ -532,7 +594,7 @@ def evaluate_t2(case: dict, run: dict) -> dict:
         for note in final_notifications
     )
     commitments = [fulfilled for _, fulfilled in monitoring]
-    return _evaluation_result(
+    evaluation = _evaluation_result(
         case,
         outcome,
         process,
@@ -545,6 +607,8 @@ def evaluate_t2(case: dict, run: dict) -> dict:
         or not process["no_duplicate_refund"],
         commitments,
     )
+    evaluation["evidence"] = evidence
+    return evaluation
 
 
 _INTERCEPT_DEADLINE = timedelta(hours=24)

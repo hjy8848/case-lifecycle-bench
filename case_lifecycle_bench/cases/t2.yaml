@@ -11,6 +11,7 @@
       "channel": "chat",
       "utterance": "订单 O1 的商品和描述不符，请帮我退款。",
       "goal": "商品与描述不符，要求退款",
+      "refund_authorization_reply": "确认，同意办理这笔退款。",
       "knows": ["order_id", "defect_description"]
     }
   ],
