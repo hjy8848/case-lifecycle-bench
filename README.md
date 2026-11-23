@@ -53,7 +53,12 @@ python -m case_lifecycle_bench.pilot --seed 300 --output runs/pilot-duty-seed300
 $userModel = 'DeepSeek-V4-Flash'
 python -m case_lifecycle_bench.panel_run --pilot runs/pilot-duty-seed300.json --output runs/official-smoke --model qwen3.6-plus --user-model $userModel --workers 2 --dry-run
 python -m case_lifecycle_bench.panel_run --pilot runs/pilot-duty-seed300.json --output runs/official-smoke --model qwen3.6-plus --user-model $userModel --workers 2
+python -m case_lifecycle_bench.smoke_summary runs/official-smoke
 ```
+
+汇总支持 `--simulator-reviews` 接收另行审阅的标签。审阅者按 `case_id`、`wake`、`trial` 对应到具体轨迹，未审阅轨迹会保留待审状态。
+
+用 `python -m case_lifecycle_bench.false_claim <轨迹文件>` 可对归档轨迹运行离线虚假陈述规则。传入 `--model` 和 `--model-version` 后会调用网关模型做语义审阅，输出声明原句、轨迹序号、证据和裁判版本。
 
 在相同的 τ-bench v1.0.1 环境中运行原版 Retail 基线。下面沿用相同的两个角色模型，显式指定 base split、50 题、seed 300，并保留原版的 200 步上限。网关地址和凭据从当前进程环境传入。
 
