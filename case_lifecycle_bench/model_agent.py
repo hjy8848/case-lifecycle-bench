@@ -164,7 +164,7 @@ class ChatGateway:
         )
         self.calls += 1
         try:
-            with urlopen(request, timeout=35) as response:
+            with urlopen(request, timeout=120) as response:
                 return json.load(response)["choices"][0]["message"]
         except HTTPError as error:
             raise RuntimeError(
