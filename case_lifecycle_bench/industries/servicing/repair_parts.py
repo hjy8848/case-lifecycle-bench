@@ -535,24 +535,13 @@ def _false_claims(trajectory, initial_state):
 
 
 def mentions_slot(text: str, slot: str) -> bool:
-    """The slot's label, or its real date with its start time, whatever the wording.
+    """The confirmation names the slot as the scheduler offered it.
 
-    Slots are labelled by virtual day ("D5 09:00-11:00"). A customer-facing message
-    that says "1月9日上午9点" is just as good, but one that gives the wrong date is not.
+    This is a known limit of the automatic check: a customer-facing paraphrase such as
+    "1月9日上午9点" is not accepted, and a judge or a human has to decide those. The rule
+    stays literal on purpose, so that it is not tuned to the wording a model happened to use.
     """
-    if slot in text:
-        return True
-    day, window = slot.split(" ")
-    moment = _case_time(f"{day} {window.split('-')[0]}")
-    hour, minute = f"{moment:%H}", f"{moment:%M}"
-    dates = (
-        f"{moment:%Y-%m-%d}",
-        f"{moment.month}月{moment.day}日",
-        f"{moment:%m-%d}",
-        f"{moment.month}/{moment.day}",
-    )
-    starts = (f"{hour}:{minute}", f"{int(hour)}:{minute}", f"{int(hour)}点")
-    return any(date in text for date in dates) and any(start in text for start in starts)
+    return slot in text
 
 
 def evaluate(case: dict, run: dict) -> dict:

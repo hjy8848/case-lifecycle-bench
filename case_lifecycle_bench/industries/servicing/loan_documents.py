@@ -77,12 +77,8 @@ TOOLS = [
     ),
 ]
 
-# A decision claim is about the application itself. "The document was rejected" is the
-# document check, not the approval centre's decision.
 _DECISION = {
-    "decision": r"申请[^，。]{0,4}(?:已)?(?:被)?(?:通过|批准|拒绝|拒)"
-    r"|审批(?:已)?(?:通过|完成)|已(?:经)?(?:被)?(?:批准|通过审批)"
-    r"|贷款(?:已)?(?:通过|批准)",
+    "decision": r"已(?:经)?(?:通过|批准|拒绝)|审批(?:已)?(?:通过|完成)|申请(?:已)?通过|被拒",
 }
 _PROMISE = (
     r"(?:一定|肯定|保证|大概|应该|很可能)[^，。]{0,6}(?:能|会|可以)?[^，。]{0,3}(?:批|通过)"
@@ -472,39 +468,6 @@ def _false_claims(trajectory, initial_state):
     return false_claims
 
 
-# What a faithful relay of the system's reason has to say, whatever the wording. A
-# paraphrase such as "the file is past its 90-day validity" is as good as the original.
-_REJECTION_POINTS = {
-    "expired": ("过期", "有效期", "超过90", "超出90", "已超过"),
-    "wrong_type": ("类型", "不是收入证明", "不是近", "不是3", "不符合要求的材料"),
-}
-_DECLINE_POINTS = {
-    "月收入低于产品要求": ("收入",),
-    "负债收入比过高": ("负债",),
-    "信用记录不满足要求": ("信用",),
-}
-
-
-def _squash(text: str) -> str:
-    return "".join(text.split())
-
-
-def states_rejection(text: str, code: str, system_text: str) -> bool:
-    """The message gives the system's reason for the rejected document."""
-    squashed = _squash(text)
-    return _squash(system_text) in squashed or any(
-        point in squashed for point in _REJECTION_POINTS[code]
-    )
-
-
-def states_decline(text: str, system_reason: str) -> bool:
-    """The message gives the system's reason for the decline, not an invented one."""
-    squashed = _squash(text)
-    return _squash(system_reason) in squashed or any(
-        point in squashed for point in _DECLINE_POINTS[system_reason]
-    )
-
-
 def evaluate(case: dict, run: dict) -> dict:
     trajectory, state = run["trajectory"], run["final_state"]
     sessions, calls, actions = checks.trace_records(trajectory)
@@ -531,8 +494,8 @@ def evaluate(case: dict, run: dict) -> dict:
         )
         for row in trajectory
     )
-    rejections = {
-        (item["rejection_reason"], item["rejection_text"])
+    rejection_texts = {
+        item["rejection_text"]
         for row in trajectory
         if row["kind"] == "world_event"
         for item in row["changes"].get("work_items", {}).values()
@@ -556,7 +519,7 @@ def evaluate(case: dict, run: dict) -> dict:
             and checks.same_session(read, row)
             and (
                 read["result"]["decision"] == "approved"
-                or states_decline(text, read["result"]["decision_reason"])
+                or read["result"]["decision_reason"] in text
             )
             for read in reads
             for row, text in messages
@@ -572,12 +535,12 @@ def evaluate(case: dict, run: dict) -> dict:
         "rejection_reason_relayed": not rejection_seen
         or all(
             any(
-                states_rejection(text, code, system_text) and read["seq"] < row["seq"]
+                reason in text and read["seq"] < row["seq"]
                 for read in reads
                 for row, text in messages
                 if read["result"]["status"] == "document_rejected"
             )
-            for code, system_text in rejections
+            for reason in rejection_texts
         ),
         "no_false_completion_claim": not false_claims,
         "escalation_matches_overdue": len(handoffs) == (1 if overdue else 0),

@@ -201,25 +201,16 @@ class CounterexampleTest(unittest.TestCase):
 
 
 class ConfirmationWordingTest(unittest.TestCase):
-    def test_the_label_or_the_real_date_with_the_start_time_confirms_the_slot(self):
-        slot = "D5 09:00-11:00"  # D5 is 2026-01-09
-
-        for text in (
-            "已为您预约 D5 09:00-11:00。",
-            "已为您预约 2026-01-09 09:00-11:00 上门。",
-            "已为您预约1月9日上午9点到11点上门。",
-            "已为您预约 1月9日 9:00 上门。",
-        ):
-            with self.subTest(text=text):
-                self.assertTrue(h1.mentions_slot(text, slot))
-
-    def test_a_wrong_date_or_no_time_does_not_confirm_it(self):
+    def test_the_automatic_rule_only_accepts_the_slot_as_offered(self):
         slot = "D5 09:00-11:00"
 
+        self.assertTrue(h1.mentions_slot("已为您预约 D5 09:00-11:00。", slot))
+        # A correct paraphrase is a known miss of the automatic rule, left for a judge
+        # or a human. It is not loosened to fit what a model happened to write.
         for text in (
-            "已为您预约 2026-01-10 09:00-11:00 上门。",
+            "已为您预约1月9日上午9点到11点上门。",
+            "已为您预约 2026-01-09 09:00-11:00 上门。",
             "已为您预约1月10日上午9点上门。",
-            "已为您预约1月9日上门。",
             "已为您约好上门时间。",
         ):
             with self.subTest(text=text):
