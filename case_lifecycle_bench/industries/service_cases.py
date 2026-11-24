@@ -5,6 +5,7 @@ from .servicing.claim_payout import CLAIM_PAYOUT
 from .servicing.credit_delinquency import DELINQUENCY
 from .servicing.insurance_renewal import RENEWAL
 from .servicing.damage_revision import DAMAGE_REVISION
+from .servicing.loan_disbursement import DISBURSEMENT
 from .servicing.loan_documents import APPLICATION
 from .servicing.repair_parts import REPAIR
 
@@ -16,6 +17,7 @@ WORKFLOWS = {
     "insurance-claim-documents": CLAIM_DOCUMENTS,
     "insurance-claim-payout": CLAIM_PAYOUT,
     "insurance-damage-revision": DAMAGE_REVISION,
+    "credit-disbursement": DISBURSEMENT,
 }
 BY_TEMPLATE = {workflow.template: workflow for workflow in WORKFLOWS.values()}
 
