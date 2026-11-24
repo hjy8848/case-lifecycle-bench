@@ -91,10 +91,11 @@ def evaluate_single_t3(case: dict, run: dict) -> dict:
             for shipment in row["changes"].get("shipments", {}).values()
         )
     ]
-    warehouse_checked = any(
-        cancellation["seq"] < query["seq"] < request["seq"]
+    # Reading fulfillment before or after the OMS cancellation both satisfy the
+    # policy; the interception request must follow the read.
+    warehouse_checked = bool(oms_cancellations) and any(
+        query["seq"] < request["seq"]
         for query in warehouse_queries
-        for cancellation in oms_cancellations
         for request in intercept_requests
     )
     intercept_events = [

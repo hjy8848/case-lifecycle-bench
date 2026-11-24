@@ -486,25 +486,30 @@ def evaluate_t2(case: dict, run: dict) -> dict:
     return evaluation
 
 
-def _t9_ticket_reuse(records, ticket_id, user_id):
-    found_original = False
+_TICKET_WRITES = {"add_ticket_note", "schedule_followup", "close_ticket"}
+
+
+def _t9_ticket_reuse(records, ticket_id):
+    """The revisit session reads or updates the original ticket.
+
+    A stateless agent can only learn the ticket ID by searching the CRM, and a
+    search result already carries the notes, so a committed update counts as much
+    as a separate read. Memory settings may supply the ID without a search.
+    """
     for row in records:
         if row["kind"] != "tool_call":
             continue
         result = row["result"]
         if (
-            row["tool"] == "search_tickets"
-            and row["args"].get("user_id") == user_id
-            and isinstance(result, list)
-        ):
-            found_original = found_original or any(
-                ticket["ticket_id"] == ticket_id for ticket in result
-            )
-        if (
-            found_original
-            and row["tool"] == "get_ticket"
+            row["tool"] == "get_ticket"
             and isinstance(result, dict)
             and result.get("ticket_id") == ticket_id
+        ):
+            return True
+        if (
+            row["tool"] in _TICKET_WRITES
+            and row.get("committed")
+            and row["args"].get("ticket_id") == ticket_id
         ):
             return True
     return False
@@ -541,9 +546,7 @@ def evaluate_t9(case: dict, run: dict) -> dict:
         prior_tickets = tickets_at_start + [
             ticket_id for row, ticket_id in creations if row["seq"] < start["seq"]
         ]
-        reused = bool(prior_tickets) and _t9_ticket_reuse(
-            records, prior_tickets[0], user_id
-        )
+        reused = bool(prior_tickets) and _t9_ticket_reuse(records, prior_tickets[0])
         created_here = sum(row["session_id"] == session_id for row, _ in creations)
         no_duplicate = created_here == 0 or len(prior_tickets) + created_here <= 1
         reuse_checks.append(reused)
@@ -589,6 +592,12 @@ def evaluate_t3(case: dict, run: dict) -> dict:
             for row in state["refunds"].values()
         )
         == 1,
+        # The refund must return what OMS recorded for the order.
+        "refund_matches_order_amount": all(
+            abs(row["amount"] - state["orders"][order_id]["amount"]) < 0.005
+            for row in state["refunds"].values()
+            if row["order_id"] == order_id and row["status"] in _ACTIVE_REFUND_STATES
+        ),
     }
     ship_queries = [
         row
@@ -698,10 +707,12 @@ def evaluate_t3(case: dict, run: dict) -> dict:
                 if row["args"].get("order_id") == order_id
                 and row["session_id"] == session_id
             ]
+            # The policy lets an agent read fulfillment before or after the OMS
+            # cancellation; only the interception request must follow the read.
             passed = (
                 bool(cancellations)
                 and any(
-                    checks.before_session_action(cancellations[0], [row])
+                    row["session_id"] == session_id
                     and checks.before_session_action(row, requests)
                     for row in fulfillment_queries
                 )
