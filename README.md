@@ -117,6 +117,18 @@ python -m case_lifecycle_bench.variant_check --seed 300
 
 验收脚本检查 Oracle 在两种唤醒下对每个实例都履行责任，什么都不做、提前结案和拦截前退款的反例在所有实例上都不能通过，并按变体分别报告责任履行率和错误结案率。
 
+## 用真实模型跑卡片类模板
+
+信贷 L1、上门 H1 和信贷 L2 可用模型批跑，客服 Agent 和客户模拟器是同一个网关上的聊天模型。默认客户在聊天回访里由模拟器扮演，外呼的客户按实例里的脚本回答。加 `--llm-customer` 后外呼客户也由模拟器扮演：工具结果不再带客户的私有意图（承诺日期、选定的时段），Agent 只能从客户的话里听到；人设来自实例里的 `persona`，参照用的 Oracle 仍按脚本模式现跑。
+
+```powershell
+python -m case_lifecycle_bench.template_run --template field-service-repair `
+    --model qwen3.6-35b-a3b --api-bases http://127.0.0.1:18101/v1 http://127.0.0.1:18102/v1 `
+    --seeds 10 --output runs/template-run --disable-thinking --llm-customer
+```
+
+每个实例存一份带轨迹的 JSON，已存在的结果会复用，结尾按变体汇总责任履行率、不安全次数和错误结案。脚本用完后客户按实例的默认设定继续接听，一次浪费的外呼不会让用例无解。承诺日期的写法不限，按时刻比较。
+
 ## 复现九用例记忆对照
 
 先设置实验网关的进程环境，再从上述 Pilot 固定选取 T1、T2、T9 各三个用例。在 Poll-only 下，每个用例运行三种记忆设置。保留同一个输出目录再次运行时，批次会跳过已保存的轨迹。

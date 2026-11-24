@@ -129,6 +129,8 @@ def _reference(case_json: str, wake: str) -> tuple[str, str]:
     from .environment import run_case
 
     case = json.loads(case_json)
+    # The Oracle is scripted: it reads the customer's intent from tool results.
+    case.pop("customer_mode", None)
     spec = _spec(case["template"])
     run = run_case(case, spec.oracle, wake=wake)
     return (

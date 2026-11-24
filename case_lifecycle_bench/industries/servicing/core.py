@@ -22,6 +22,11 @@ from ...lifecycle import (
 _INTAKE = _VISIT + 1
 _CONTACT = _VISIT + 2
 
+_LIVE_CALL_NOTE = (
+    "The live call opens as a new session after you end this one. Do the call work "
+    "(verify, inform, offer slots, book) in that session, and do not start another contact."
+)
+
 # Errors that mean the agent broke a contact rule, as opposed to a plain failure.
 CONTACT_VIOLATIONS = {
     "outside_contact_window",
@@ -36,6 +41,9 @@ class ServicingEnvironment(LifecycleEnvironment):
 
     def __init__(self, case: dict, wake: str):
         self.case_id = case["case_id"]
+        # With a simulated customer, what they privately intend must reach the agent
+        # only through what they say, never through a tool result.
+        self.hide_customer_intent = case.get("customer_mode") == "llm"
         self.contact_policy = case.get("contact_policy")
         self.script = deepcopy(case["init"].get("script", {}))
         self.contact_scripts = {}
@@ -182,7 +190,7 @@ class ServicingEnvironment(LifecycleEnvironment):
         if tool == "verify_customer_identity" or tool in self.contact_tools:
             contact = self.state["contacts"].get(args.get("contact_id"))
             if contact is None or contact["session_id"] != session_id:
-                return {"error": "contact_not_active"}, {}
+                return {"error": "contact_not_active", "note": _LIVE_CALL_NOTE}, {}
             if tool == "verify_customer_identity":
                 return self._verify_identity(contact)
             others = {key: value for key, value in args.items() if key != "contact_id"}
@@ -284,11 +292,20 @@ class ServicingEnvironment(LifecycleEnvironment):
             return {"error": "rolling_attempt_limit"}, {}
         index = len(self.state["contacts"])
         scripts = self.script.get("contacts", [])
-        script = scripts[index] if index < len(scripts) else {"answers": False}
+        # Once the scripted calls are used up, the customer keeps answering the
+        # way the instance defines. One wasted call must not doom the case.
+        script = (
+            scripts[index]
+            if index < len(scripts)
+            else self.script.get("default_contact", {"answers": False})
+        )
         status = "answered" if script["answers"] else "no_answer"
         contact_id = self._new_id("contacts", "C")
         self.contact_scripts[contact_id] = script
-        return {"contact_id": contact_id, "status": status}, {
+        result = {"contact_id": contact_id, "status": status}
+        if status == "answered":
+            result["note"] = _LIVE_CALL_NOTE
+        return result, {
             "contacts": {
                 contact_id: {
                     "contact_id": contact_id,

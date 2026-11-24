@@ -67,7 +67,9 @@ TOOLS = [
     ),
     _tool(
         "start_outbound_contact",
-        "Start a proactive contact on a channel, voice or sms.",
+        "Start a proactive contact on a channel, voice or sms. If the customer "
+        "answers, the live call opens as a new session once you end this one; do the "
+        "call work (verify, inform, record) in that session, not in this one.",
         {"customer_id": "string", "channel": "string"},
     ),
     _tool(
@@ -78,7 +80,7 @@ TOOLS = [
     _tool(
         "inform_overdue_status",
         "State the verified overdue status to the customer on the active contact. "
-        "Returns the repayment date the customer offers, if any.",
+        "The customer may offer a repayment date, in their reply or in the result.",
         {"contact_id": "string"},
     ),
     _tool(
@@ -114,6 +116,29 @@ def _shift(label: str, **delta) -> str:
     return _label(_case_time(label) + timedelta(**delta))
 
 
+def _human(label: str) -> str:
+    moment = _case_time(label)
+    return f"{moment.month}月{moment.day}日{moment:%H:%M}"
+
+
+def _contact(promise: str | None) -> dict:
+    """One answered call: the scripted promise and the persona that voices it."""
+    persona = (
+        "你是一位贷款逾期 3 天的客户，正在接听贷款服务的来电，对方核验身份时你会配合。"
+        + (
+            f"被问到还款安排时，你明确说会在 {_human(promise)} 前还款，并且只说这一个时间。"
+            if promise
+            else "被问到还款安排时，你说暂时还不能确定还款时间。"
+        )
+        + "你不会主动提出其他要求，对方说完事情后你可以结束通话。"
+    )
+    return {
+        "answers": True,
+        "promise_by": _iso(_case_time(promise)) if promise else None,
+        "persona": persona,
+    }
+
+
 def generate(seed: int) -> dict:
     variant = variant_for_seed(seed)
     rng = Random(f"credit-delinquency/{seed}")
@@ -138,7 +163,7 @@ def generate(seed: int) -> dict:
         promise = rng.choice(("D3 16:00", "D3 18:00"))
         paid = rng.choice(("D3 10:30", "D3 13:00", "D3 15:00"))
         posted = rng.choice(("D4 08:30", "D4 09:00", "D4 10:30"))
-        contacts = [{"answers": True, "promise_by": _iso(_case_time(promise))}]
+        contacts = [_contact(promise)]
         event("E1", promise, "promise_deadline", "credit.promise_check", n=1)
         event("E2", paid, "payment_initiated")
         event("E3", posted, "payment_posted", "credit.settlement_notice")
@@ -161,10 +186,7 @@ def generate(seed: int) -> dict:
         promise = rng.choice(("D3 12:00", "D3 16:00", "D3 18:00"))
         second = "D6 18:00"
         paid = "D6 16:00"
-        contacts = [
-            {"answers": True, "promise_by": _iso(_case_time(promise))},
-            {"answers": True, "promise_by": _iso(_case_time(second))},
-        ]
+        contacts = [_contact(promise), _contact(second)]
         event("E1", promise, "promise_deadline", "credit.promise_check", n=1)
         event("E2", paid, "payment_initiated")
         event("E3", second, "promise_deadline", "credit.promise_check", n=2)
@@ -181,10 +203,7 @@ def generate(seed: int) -> dict:
     else:
         promise = rng.choice(("D3 12:00", "D3 16:00", "D3 18:00"))
         second = rng.choice(("D5 12:00", "D5 16:00"))
-        contacts = [
-            {"answers": True, "promise_by": _iso(_case_time(promise))},
-            {"answers": True, "promise_by": _iso(_case_time(second))},
-        ]
+        contacts = [_contact(promise), _contact(second)]
         event("E1", promise, "promise_deadline", "credit.promise_check", n=1)
         event("E2", second, "promise_deadline", "credit.promise_check", n=2)
         revisit = "我想确认一下这笔欠款现在是什么情况，之前的提醒还要继续吗？"
@@ -211,7 +230,13 @@ def generate(seed: int) -> dict:
             "customer_id": f"SYN-CUS-{number}",
             "subject_id": subject,
             "amount": amount,
-            "script": {"contacts": [{"identity_verifiable": True, **row} for row in contacts]},
+            "script": {
+                "contacts": [{"identity_verifiable": True, **row} for row in contacts],
+                "default_contact": {
+                    "identity_verifiable": True,
+                    **_contact(None),
+                },
+            },
         },
         "contact_policy": {
             "channels": ["voice", "sms"],
@@ -230,6 +255,14 @@ def generate(seed: int) -> dict:
 
 
 # -- environment ---------------------------------------------------------------
+
+
+def _normalize(value) -> str | None:
+    """A model may write the date its own way; compare the moment, not the text."""
+    try:
+        return _iso(datetime.fromisoformat(str(value).strip().replace(" ", "T")))
+    except ValueError:
+        return None
 
 
 class DelinquencyEnvironment(ServicingEnvironment):
@@ -287,13 +320,16 @@ class DelinquencyEnvironment(ServicingEnvironment):
         if not contact["identity_verified"]:
             return {"error": "identity_not_verified"}, {}
         if tool == "inform_overdue_status":
-            return {
-                "delivered": True,
-                "status": record["status"],
-                "commitment_offered_by": script.get("promise_by"),
-            }, {}
-        promised = args["promised_by"]
-        if promised != script.get("promise_by") or any(
+            result = {"delivered": True, "status": record["status"]}
+            if not self.hide_customer_intent:
+                # A scripted customer has no voice, so the offer rides on the result.
+                result["commitment_offered_by"] = script.get("promise_by")
+            return result, {}
+        promised = _normalize(args["promised_by"])
+        offered = script.get("promise_by")
+        if promised is None:
+            return {"error": "invalid_time"}, {}
+        if promised != offered or any(
             row["promised_by"] == promised for row in record["promises"]
         ):
             return {"error": "commitment_not_offered"}, {}

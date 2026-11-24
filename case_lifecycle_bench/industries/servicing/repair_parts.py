@@ -82,13 +82,15 @@ TOOLS = [
     ),
     _tool(
         "start_outbound_contact",
-        "Start a proactive contact on a channel, voice or sms.",
+        "Start a proactive contact on a channel, voice or sms. If the customer "
+        "answers, the live call opens as a new session once you end this one; offer "
+        "and book slots in that session, not in this one.",
         {"customer_id": "string", "channel": "string"},
     ),
     _tool(
         "offer_available_slots",
-        "On the active contact, read the scheduler's available slots and the slot "
-        "the customer confirms, if any. Only works once the part is ready.",
+        "On the active contact, read the scheduler's available slots. The customer "
+        "confirms a slot in their reply or in the result. Only works once the part is ready.",
         {"contact_id": "string"},
     ),
     _tool(
@@ -123,6 +125,22 @@ def _label(moment: datetime) -> str:
 
 def _shift(label: str, **delta) -> str:
     return _label(_case_time(label) + timedelta(**delta))
+
+
+def _contact(slots, chosen) -> dict:
+    """One answered call: the scripted choice and the persona that voices it."""
+    persona = (
+        "你是一位等待空调维修的客户，正在接听预约上门时间的来电。"
+        f"对方会告诉你可选的上门时段。你想约 {chosen}，只要对方提供的时段里有它，"
+        f"就明确说“确认 {chosen}”；对方没提供时，选对方提供的第一个时段并说明。"
+        "你不会主动提出其他要求，预约确定后可以结束通话。"
+    )
+    return {
+        "answers": True,
+        "available_slots": slots,
+        "chosen_slot": chosen,
+        "persona": persona,
+    }
 
 
 def generate(seed: int) -> dict:
@@ -199,9 +217,8 @@ def generate(seed: int) -> dict:
             "part_model": required,
             "ordered_at": _iso(_case_time("D1 10:00")),
             "script": {
-                "contacts": [
-                    {"answers": True, "available_slots": slots, "chosen_slot": chosen}
-                ]
+                "contacts": [_contact(slots, chosen)],
+                "default_contact": _contact(slots, chosen),
             },
         },
         "contact_policy": {
@@ -287,7 +304,11 @@ class RepairEnvironment(ServicingEnvironment):
             return {"error": "part_not_ready"}, {}
         if tool == "offer_available_slots":
             slots = script["available_slots"]
-            return {"slots": slots, "customer_choice": script.get("chosen_slot")}, {
+            result = {"slots": slots}
+            if not self.hide_customer_intent:
+                # A scripted customer has no voice, so the choice rides on the result.
+                result["customer_choice"] = script.get("chosen_slot")
+            return result, {
                 "contacts": {
                     contact["contact_id"]: {**contact, "offered_slots": slots}
                 }
