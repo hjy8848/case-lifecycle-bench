@@ -24,13 +24,13 @@ def run_case(
     if single_session and case["template"] != "cancel_partial_success":
         raise ValueError("Single-session comparison requires a T3 case")
     industry = case.get("industry") or "retail"
-    if industry == "insurance":
+    from .industries.service_cases import BY_TEMPLATE
+
+    if industry == "insurance" and case["template"] not in BY_TEMPLATE:
         from .industries.insurance.environment import InsuranceEnvironment
 
         return InsuranceEnvironment(case, wake).run(agent)
-    if industry in {"credit", "field_service"}:
-        from .industries.service_cases import BY_TEMPLATE
-
+    if case["template"] in BY_TEMPLATE:
         return (
             BY_TEMPLATE[case["template"]]
             .environment(case, wake, customer=customer)

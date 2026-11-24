@@ -227,6 +227,12 @@ def evaluate_t1(case: dict, run: dict) -> dict:
     }
 
 
+def _servicing_templates():
+    from .industries.service_cases import BY_TEMPLATE
+
+    return BY_TEMPLATE
+
+
 def evaluate_case(case: dict, run: dict) -> dict:
     """Evaluate any implemented lifecycle template through its business rules."""
     evaluators = {
@@ -240,7 +246,7 @@ def evaluate_case(case: dict, run: dict) -> dict:
         from .industries.insurance.evaluation import evaluate_insurance
 
         evaluation = evaluate_insurance(case, run)
-    elif case.get("industry") in {"credit", "field_service"}:
+    elif template in _servicing_templates():
         from .industries.service_cases import BY_TEMPLATE
 
         evaluation = BY_TEMPLATE[template].evaluate(case, run)
