@@ -120,6 +120,14 @@ _CLAIMS = {
 }
 
 
+# Tools whose "text" argument goes to the customer.
+MESSAGE_TOOLS = {
+    "send_message_to_user",
+    "send_supplement_reminder",
+    "request_document_clarification",
+}
+
+
 def completion_claims(trajectory, patterns=None) -> list[dict]:
     """Customer-facing statements that something is already done, in trace order."""
     # A pattern may come with its own hedge, for claims such as "expected within 3
@@ -138,7 +146,7 @@ def completion_claims(trajectory, patterns=None) -> list[dict]:
     for row in trajectory:
         if row["kind"] == "message" and row["role"] == "agent":
             text = row["text"]
-        elif row.get("tool") == "send_message_to_user" and row["committed"]:
+        elif row.get("tool") in MESSAGE_TOOLS and row["committed"]:
             text = row["args"]["text"]
         else:
             continue
