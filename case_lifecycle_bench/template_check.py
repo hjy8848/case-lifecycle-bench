@@ -52,33 +52,15 @@ TEMPLATES = {
 
 for _name, _workflow in WORKFLOWS.items():
     _agents = workflow_agents(_workflow)
-    if hasattr(_workflow, "counterexamples"):  # a card-based servicing template
-        TEMPLATES[_name] = Template(
-            partial(_workflow.generate, 300),
-            _workflow.generate,
-            _agents["oracle"],
-            tuple(
-                (_agents[agent], section, key)
-                for agent, section, key in _workflow.counterexamples
-            ),
-            _workflow.oracle_process_checks,
-        )
-        continue
     TEMPLATES[_name] = Template(
         partial(_workflow.generate, 300),
         _workflow.generate,
         _agents["oracle"],
-        (
-            (_agents["missed-initial-review"], "process", "initial_review_scheduled"),
-            (_agents["premature-action"], "process", "valid_actions_only"),
-            (_agents["missed-final-notice"], "outcome", "case_completed"),
+        tuple(
+            (_agents[agent], section, key)
+            for agent, section, key in _workflow.counterexamples
         ),
-        (
-            "initial_review_scheduled",
-            "all_milestones_completed",
-            "valid_actions_only",
-            "promise_followup_scheduled",
-        ),
+        _workflow.oracle_process_checks,
     )
 
 

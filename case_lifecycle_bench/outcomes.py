@@ -85,11 +85,18 @@ _CLAIMS = {
 
 def completion_claims(trajectory, patterns=None) -> list[dict]:
     """Customer-facing statements that something is already done, in trace order."""
-    compiled = (
-        _CLAIMS
-        if patterns is None
-        else {kind: re.compile(pattern) for kind, pattern in patterns.items()}
-    )
+    # A pattern may come with its own hedge, for claims such as "expected within 3
+    # days" that the default hedge would wrongly excuse.
+    compiled = {
+        kind: (re.compile(pattern), _HEDGE)
+        for kind, pattern in (_CLAIMS if patterns is None else {}).items()
+    }
+    for kind, value in (patterns or {}).items():
+        pattern, hedge = (value, None) if isinstance(value, str) else value
+        compiled[kind] = (
+            re.compile(pattern),
+            _HEDGE if hedge is None else re.compile(hedge),
+        )
     found = []
     for row in trajectory:
         if row["kind"] == "message" and row["role"] == "agent":
@@ -99,10 +106,8 @@ def completion_claims(trajectory, patterns=None) -> list[dict]:
         else:
             continue
         for clause in _CLAUSE_SPLIT.split(text):
-            if _HEDGE.search(clause):
-                continue
-            for kind, pattern in compiled.items():
-                if pattern.search(clause):
+            for kind, (pattern, hedge) in compiled.items():
+                if pattern.search(clause) and not hedge.search(clause):
                     found.append({"seq": row["seq"], "kind": kind, "sentence": clause})
     return found
 

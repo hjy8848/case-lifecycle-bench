@@ -59,7 +59,7 @@ python -m case_lifecycle_bench.template_check --template insurance-renewal --see
 - [共同评分函数](case_lifecycle_bench/eval_checks.py) 使用同一条轨迹计算对话成功、事件查证延迟和条件回访等观测量。查证必须读到事件改变后的权威记录。结案和违规谓词由模板定义。
 - 新模板在 [验收入口](case_lifecycle_bench/template_check.py) 登记生成器、Oracle、反例和必过的业务检查。
 
-信贷逾期跟进、审批补件和上门维修使用同一个状态推进引擎。可用 `--instance-seed` 复现单道生成题。信贷逾期跟进已按设计卡返工，实现在 [servicing 引擎](case_lifecycle_bench/industries/servicing/core.py) 上，题目带 `terminal_variant`，评分见上面的三个结果。
+信贷逾期跟进、贷款审批补件和上门维修使用同一个状态推进引擎，并已按设计卡返工。三个模板建在 [servicing 引擎](case_lifecycle_bench/industries/servicing/core.py) 上，题目带 `terminal_variant`，评分见上面的三个结果。可用 `--instance-seed` 复现单道生成题。
 
 ```powershell
 python -m case_lifecycle_bench.template_check --template credit-delinquency --seed 300

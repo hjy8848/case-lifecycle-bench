@@ -21,13 +21,9 @@ def run_case(
 
         return InsuranceEnvironment(case, wake).run(agent)
     if industry in {"credit", "field_service"}:
-        from .industries.service import ServiceEnvironment
         from .industries.service_cases import BY_TEMPLATE
 
-        workflow = BY_TEMPLATE[case["template"]]
-        if hasattr(workflow, "environment"):
-            return workflow.environment(case, wake).run(agent)
-        return ServiceEnvironment(case, wake, workflow).run(agent)
+        return BY_TEMPLATE[case["template"]].environment(case, wake).run(agent)
     if industry != "retail":
         raise ValueError(f"Unsupported industry: {industry}")
     return RetailEnvironment(case, wake, single_session).run(agent)
