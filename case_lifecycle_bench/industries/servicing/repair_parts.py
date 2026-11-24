@@ -534,6 +534,27 @@ def _false_claims(trajectory, initial_state):
     return false_claims
 
 
+def mentions_slot(text: str, slot: str) -> bool:
+    """The slot's label, or its real date with its start time, whatever the wording.
+
+    Slots are labelled by virtual day ("D5 09:00-11:00"). A customer-facing message
+    that says "1月9日上午9点" is just as good, but one that gives the wrong date is not.
+    """
+    if slot in text:
+        return True
+    day, window = slot.split(" ")
+    moment = _case_time(f"{day} {window.split('-')[0]}")
+    hour, minute = f"{moment:%H}", f"{moment:%M}"
+    dates = (
+        f"{moment:%Y-%m-%d}",
+        f"{moment.month}月{moment.day}日",
+        f"{moment:%m-%d}",
+        f"{moment.month}/{moment.day}",
+    )
+    starts = (f"{hour}:{minute}", f"{int(hour)}:{minute}", f"{int(hour)}点")
+    return any(date in text for date in dates) and any(start in text for start in starts)
+
+
 def evaluate(case: dict, run: dict) -> dict:
     trajectory, state = run["trajectory"], run["final_state"]
     sessions, calls, actions = checks.trace_records(trajectory)
@@ -580,12 +601,16 @@ def evaluate(case: dict, run: dict) -> dict:
         )
 
     def booked_then_confirmed(close):
+        # The customer may be told on the call itself or by a message afterwards.
         slot = record["appointment"]["slot"]
+        booked_at = datetime.fromisoformat(record["appointment"]["booked_at"])
         return any(
-            slot in note["args"].get("text", "")
+            mentions_slot(
+                note["args"]["text"] if note["kind"] == "tool_call" else note["text"], slot
+            )
             and note["seq"] < close["seq"]
-            and checks.record_time(note) >= datetime.fromisoformat(record["appointment"]["booked_at"])
-            for note in actions["send_message_to_user"]
+            and checks.record_time(note) >= booked_at
+            for note in messages
         )
 
     waiting = not booked and not escalated

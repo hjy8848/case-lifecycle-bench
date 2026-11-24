@@ -200,6 +200,51 @@ class CounterexampleTest(unittest.TestCase):
                 self.assertEqual(result["metrics"]["wrongful_closure"], 1)
 
 
+class ConfirmationWordingTest(unittest.TestCase):
+    def test_the_label_or_the_real_date_with_the_start_time_confirms_the_slot(self):
+        slot = "D5 09:00-11:00"  # D5 is 2026-01-09
+
+        for text in (
+            "已为您预约 D5 09:00-11:00。",
+            "已为您预约 2026-01-09 09:00-11:00 上门。",
+            "已为您预约1月9日上午9点到11点上门。",
+            "已为您预约 1月9日 9:00 上门。",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(h1.mentions_slot(text, slot))
+
+    def test_a_wrong_date_or_no_time_does_not_confirm_it(self):
+        slot = "D5 09:00-11:00"
+
+        for text in (
+            "已为您预约 2026-01-10 09:00-11:00 上门。",
+            "已为您预约1月10日上午9点上门。",
+            "已为您预约1月9日上门。",
+            "已为您约好上门时间。",
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(h1.mentions_slot(text, slot))
+
+    def test_telling_the_customer_on_the_call_counts_like_a_message(self):
+        case = next(c for c in map(h1.generate, range(300, 310)) if c["terminal_variant"] == "resolved")
+        run = run_case(case, h1.oracle)
+        slot = next(
+            r["result"]["slot"] for r in run["trajectory"] if r.get("tool") == "book_appointment"
+        )
+
+        def talk_instead(session, call):
+            def spoken(tool, **args):
+                if tool == "send_message_to_user":
+                    return call("say_to_customer", contact_id="C1", text=args["text"])
+                return call(tool, **args)
+
+            return h1.oracle(session, spoken)
+
+        result = score(case, talk_instead)
+
+        self.assertTrue(result["process"]["closure_matches_state"], slot)
+
+
 class ClaimTest(unittest.TestCase):
     @staticmethod
     def claims(*texts):
