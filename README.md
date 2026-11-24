@@ -57,7 +57,16 @@ python -m case_lifecycle_bench.template_check --template insurance-renewal --see
 
 - [生命周期引擎](case_lifecycle_bench/lifecycle.py) 维护虚拟时钟、事件触发、唤醒、工具轨迹和 CRM 跟进。行业提供业务状态、工具以及允许的状态变化。
 - [共同评分函数](case_lifecycle_bench/eval_checks.py) 使用同一条轨迹计算对话成功、事件查证延迟和条件回访等观测量。查证必须读到事件改变后的权威记录。结案和违规谓词由模板定义。
-- 新模板在 [验收入口](case_lifecycle_bench/template_check.py) 登记生成器、Oracle、反例和必过的业务检查。Ledger 复用 [会话包装器](case_lifecycle_bench/ledger.py)，各行业在同一入口提供自身的义务和规则。
+- 新模板在 [验收入口](case_lifecycle_bench/template_check.py) 登记生成器、Oracle、反例和必过的业务检查。
+
+信贷逾期跟进、审批补件和上门维修使用同一个状态推进引擎。可用 `--instance-seed` 复现单道生成题。
+
+```powershell
+python -m case_lifecycle_bench.template_check --template credit-delinquency --seed 300
+python -m case_lifecycle_bench.template_check --template credit-application --seed 300
+python -m case_lifecycle_bench.template_check --template field-service-repair --seed 300
+python -m case_lifecycle_bench --case credit-delinquency --instance-seed 301 --wake push --trace
+```
 
 ## T3 随机订单号对照
 
@@ -71,7 +80,7 @@ python -m case_lifecycle_bench.t3_id_sweep --model qwen3.6-35b-a3b --seeds 30 --
 
 ## 保险续保的模拟外呼
 
-这道合成用例可离线运行。承保系统独立发布报价，接通外呼后先核验身份，再取得对当前报价的明确同意。续保确认与报价送达分别计分。信贷逾期跟进目前仍是场景草案。
+这道合成用例可离线运行。承保系统独立发布报价，接通外呼后先核验身份，再取得对当前报价的明确同意。续保确认与报价送达分别计分。
 
 ```powershell
 python -m case_lifecycle_bench --case insurance-renewal --wake poll --trace
@@ -84,6 +93,17 @@ python -m case_lifecycle_bench --case insurance-renewal --agent missed-notificat
 ```
 
 报价发布时间可在 D1 10:00 之后至 D3 09:00 之间调整。晚于首次复查的报价会在下一次复查时被 Poll 查到。可用 `--model` 接已有推理网关来扮演客服。客户接听、身份核验和报价同意由合成环境返回。
+
+## 通用 Ledger 五模板对照
+
+通用 Ledger 从已观察到的工单、跟进任务及标有 `Commitment:` 或 `承诺：` 的工单备注生成会话记忆。对照的三个臂共用同一套工具、业务规则和记录承诺的提示。每个模板固定一个用例，在 Poll-only 下各运行一次 CRM、完整历史和通用 Ledger。原有零售业务规则的守卫仍可通过 `--memory ledger` 运行。
+
+```powershell
+python -m case_lifecycle_bench.ledger_panel --output runs/task-ledger-oracle
+python -m case_lifecycle_bench.ledger_panel --output runs/task-ledger-panel --model qwen3.6-35b-a3b
+```
+
+有多个推理副本时，可用 `--api-bases` 传入地址。每个用例的三个设置保留在同一副本运行。单独跑一个用例时可选 `--memory task-ledger`。
 
 ## 复现九用例记忆对照
 
