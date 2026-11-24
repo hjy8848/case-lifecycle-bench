@@ -718,8 +718,10 @@ def evaluate_t3(case: dict, run: dict) -> dict:
         for row in state["followups"].values()
         if row["ticket_id"] in tickets and row["status"] == "pending"
     ]
+    content = {}
     if variant is not None:
-        process["no_false_completion_claim"] = not _t3_false_claims(
+        # What the agent said is a content check, kept out of the main score.
+        content["no_false_completion_claim"] = not _t3_false_claims(
             trajectory, run["initial_state"], order_id
         )
         process["no_unneeded_escalation"] = variant == "escalate" or not handoffs
@@ -885,6 +887,7 @@ def evaluate_t3(case: dict, run: dict) -> dict:
         not process["no_refund_before_interception"],
         commitments,
     )
+    evaluation["content"] = content
     if variant == "wait":
         # The interception outcome never lands before the deadline, so no duty is realized.
         evaluation["metrics"]["detection_rate"] = None

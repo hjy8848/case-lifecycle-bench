@@ -186,7 +186,8 @@ class WrongfulClosureTest(unittest.TestCase):
 
                 self.assertEqual(result["metrics"]["wrongful_closure"], 1)
                 self.assertFalse(result["metrics"]["case_resolution"])
-                self.assertFalse(result["process"]["no_false_completion_claim"])
+                # What it said is a content check and does not count for the main score.
+                self.assertFalse(result["content"]["no_false_completion_claim"])
 
     def test_a_responsible_agent_never_closes_wrongfully(self):
         for seed in SEEDS:
@@ -237,8 +238,9 @@ class CompletionClaimTest(unittest.TestCase):
         resolved = score(case, t3.oracle)
         early = score(case, t3.close_early)
 
-        self.assertTrue(resolved["process"]["no_false_completion_claim"])
-        self.assertFalse(early["process"]["no_false_completion_claim"])
+        self.assertTrue(resolved["content"]["no_false_completion_claim"])
+        self.assertFalse(early["content"]["no_false_completion_claim"])
+        self.assertNotIn("no_false_completion_claim", early["process"])
 
 
 class SummaryTest(unittest.TestCase):

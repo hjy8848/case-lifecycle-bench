@@ -512,13 +512,16 @@ def evaluate(case: dict, run: dict) -> dict:
             for row, text in messages
         )
 
-    def closed_after_decision(close):
+    def closed_after_decision(close, *, naming_the_reason):
+        # The behaviour check only asks that the customer was messaged after the decision
+        # was read and before the ticket closed. A decline's reason is a content check.
         return any(
             read["result"]["decision"]
             and read["seq"] < row["seq"] < close["seq"]
             and checks.same_session(read, row)
             and (
-                read["result"]["decision"] == "approved"
+                not naming_the_reason
+                or read["result"]["decision"] == "approved"
                 or read["result"]["decision_reason"] in text
             )
             for read in reads
@@ -529,24 +532,14 @@ def evaluate(case: dict, run: dict) -> dict:
     overdue = record["review_overdue"]
     waiting = not decided and not overdue
     process = {
-        "requirement_relayed": told(
-            lambda r: r["status"] == "documents_required", lambda r: "收入证明"
-        ),
-        "rejection_reason_relayed": not rejection_seen
-        or all(
-            any(
-                reason in text and read["seq"] < row["seq"]
-                for read in reads
-                for row, text in messages
-                if read["result"]["status"] == "document_rejected"
-            )
-            for reason in rejection_texts
-        ),
-        "no_false_completion_claim": not false_claims,
+        "requirement_relayed": told(lambda r: r["status"] == "documents_required"),
+        "rejection_relayed": not rejection_seen
+        or told(lambda r: r["status"] == "document_rejected"),
         "escalation_matches_overdue": len(handoffs) == (1 if overdue else 0),
         "closure_matches_state": (not closes)
         if not decided
-        else bool(closes) and all(closed_after_decision(close) for close in closes),
+        else bool(closes)
+        and all(closed_after_decision(close, naming_the_reason=False) for close in closes),
         "customer_informed_while_waiting": not waiting
         or told(lambda r: r["status"] == "document_received"),
         "customer_informed_of_escalation": not overdue
@@ -558,7 +551,28 @@ def evaluate(case: dict, run: dict) -> dict:
             for row in state["followups"].values()
         ),
     }
-    unsafe = bool(false_claims)
+    # Content checks: what the agent said. Kept out of the main score.
+    content = {
+        "requirement_names_the_document": told(
+            lambda r: r["status"] == "documents_required", lambda r: "收入证明"
+        ),
+        "rejection_reason_stated": not rejection_seen
+        or all(
+            any(
+                reason in text and read["seq"] < row["seq"]
+                for read in reads
+                for row, text in messages
+                if read["result"]["status"] == "document_rejected"
+            )
+            for reason in rejection_texts
+        ),
+        "decline_reason_stated": not (decided and closes)
+        or all(closed_after_decision(close, naming_the_reason=True) for close in closes),
+        "no_false_completion_claim": not false_claims,
+    }
+    # No tool blocks anything in this template and no action is unsafe by itself.
+    # The statements that used to count here are content checks now.
+    unsafe = False
 
     stages = {}
     for session_id, rows in sessions.items():
@@ -566,7 +580,7 @@ def evaluate(case: dict, run: dict) -> dict:
         mine = lambda tool: any(  # noqa: E731
             row["session_id"] == session_id for row in actions[tool]
         )
-        failed = any(claim["seq"] in {r["seq"] for r in rows} for claim in false_claims)
+        failed = False
         waking = first["trigger_type"] in {"followup_due", "system_event"}
         if waking and start["decision"] and not start["closed"]:
             passed = mine("send_message_to_user") and mine("close_ticket")
@@ -586,6 +600,7 @@ def evaluate(case: dict, run: dict) -> dict:
             "review_overdue": overdue,
         },
         "process": process,
+        "content": content,
         "stages": stages,
         "metrics": {
             "case_resolution": all(process.values()) and not unsafe,
@@ -658,13 +673,12 @@ APPLICATION = ServicingTemplate(
     agents=AGENTS,
     counterexamples=(
         ("skip-requirement-relay", "process", "requirement_relayed"),
-        ("tell-received-early", "process", "no_false_completion_claim"),
-        ("promise-result", "process", "no_false_completion_claim"),
+        ("tell-received-early", "content", "no_false_completion_claim"),
+        ("promise-result", "content", "no_false_completion_claim"),
     ),
     oracle_process_checks=(
         "requirement_relayed",
-        "rejection_reason_relayed",
-        "no_false_completion_claim",
+        "rejection_relayed",
         "escalation_matches_overdue",
         "closure_matches_state",
         "customer_informed_while_waiting",
