@@ -4,10 +4,12 @@ import argparse
 import hashlib
 import json
 import os
+from urllib.parse import urlsplit
 
 from .cases import t1, t2, t3, t9
 from .environment import run_case
 from .evaluation import evaluate_case
+from .industries.service_cases import WORKFLOWS, workflow_agents
 from .model_agent import ChatGateway, model_agent
 from .retail import retail_case
 
@@ -35,7 +37,9 @@ CASES = {
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--case", choices=(*CASES, "insurance-renewal"), default="t1")
+    parser.add_argument(
+        "--case", choices=(*CASES, "insurance-renewal", *WORKFLOWS), default="t1"
+    )
     parser.add_argument("--wake", choices=("poll", "push"), default="poll")
     parser.add_argument("--agent", default="oracle")
     parser.add_argument(
@@ -45,9 +49,9 @@ def main():
     )
     parser.add_argument(
         "--memory",
-        choices=("crm", "full-history", "ledger"),
+        choices=("crm", "full-history", "ledger", "task-ledger"),
         default="crm",
-        help="Ledger is available for T1, T2 and T9",
+        help="task-ledger uses shared CRM obligations; ledger uses the legacy Retail guard",
     )
     parser.add_argument(
         "--retail-order", help="Seed the case from a τ-bench v1.0.1 Retail order"
@@ -63,6 +67,10 @@ def main():
     parser.add_argument(
         "--model", help="Exact gateway model ID for a stateless model agent"
     )
+    parser.add_argument("--disable-thinking", action="store_true")
+    parser.add_argument(
+        "--instance-seed", type=int, help="Seed for an industry template"
+    )
     parser.add_argument(
         "--user-model", help="Gateway user-simulator model; defaults to --model"
     )
@@ -74,6 +82,14 @@ def main():
     )
     args = parser.parse_args()
     insurance = args.case == "insurance-renewal"
+    workflow = WORKFLOWS.get(args.case)
+    scripted_customer = insurance or workflow is not None
+    if args.instance_seed is not None and (
+        not scripted_customer or args.quote_ready_at or args.revise_quote_after_consent
+    ):
+        parser.error(
+            "--instance-seed requires an industry template without quote overrides"
+        )
     if (
         args.quote_ready_at is not None or args.revise_quote_after_consent
     ) and not insurance:
@@ -118,17 +134,22 @@ def main():
 
     if args.memory == "ledger" and args.case not in {"t1", "t2", "t9"}:
         parser.error("--memory ledger is currently supported for T1, T2 and T9")
-    if insurance:
-        if args.memory != "crm" or args.user_model or args.retail_order:
+    if scripted_customer:
+        if args.user_model or args.retail_order:
             parser.error(
-                "insurance-renewal uses CRM, synthetic data and a scripted customer"
+                "Industry templates use synthetic data and a scripted customer"
             )
+    if insurance:
         from .industries.insurance import renewal
 
         try:
-            case = renewal.renewal_case(
-                args.quote_ready_at,
-                revise_after_consent=args.revise_quote_after_consent,
+            case = (
+                renewal.generate_renewal_case(args.instance_seed)
+                if args.instance_seed is not None
+                else renewal.renewal_case(
+                    args.quote_ready_at,
+                    revise_after_consent=args.revise_quote_after_consent,
+                )
             )
         except ValueError as error:
             parser.error(str(error))
@@ -138,6 +159,11 @@ def main():
             "missing-quote-consent": renewal.missing_quote_consent,
             "missed-notification": renewal.missed_notification,
         }
+    elif workflow is not None:
+        agents = workflow_agents(workflow)
+        case = workflow.generate(
+            300 if args.instance_seed is None else args.instance_seed
+        )
     else:
         fixture, agents = CASES[args.case]
         case = fixture()
@@ -155,15 +181,19 @@ def main():
         parser.error("--user-model requires --model")
     if args.model and args.agent != "oracle":
         parser.error("--model cannot be combined with a scripted error agent")
-    user_model = None if insurance else args.user_model or args.model
+    user_model = None if scripted_customer else args.user_model or args.model
     if args.model:
         key = os.environ.get("CASE_LIFECYCLE_API_KEY")
         base = os.environ.get("CASE_LIFECYCLE_API_BASE")
-        if not (key and base):
+        if not base or (
+            not key and urlsplit(base).hostname not in {"127.0.0.1", "::1", "localhost"}
+        ):
             parser.error(
-                "--model requires CASE_LIFECYCLE_API_BASE and CASE_LIFECYCLE_API_KEY"
+                "--model requires CASE_LIFECYCLE_API_BASE and a key for non-loopback endpoints"
             )
-        gateway = ChatGateway(base, key)
+        gateway = ChatGateway(
+            base, key, enable_thinking=False if args.disable_thinking else None
+        )
         user_base = os.environ.get("CASE_LIFECYCLE_USER_API_BASE")
         user_thinking = os.environ.get("CASE_LIFECYCLE_USER_ENABLE_THINKING")
         if user_thinking not in (None, "true", "false"):
@@ -188,6 +218,8 @@ def main():
                 "policy": insurance_model.POLICY,
                 "tools": insurance_model.TOOLS,
             }
+        elif workflow is not None:
+            model_options = {"policy": workflow.policy, "tools": workflow.tools}
         agent = model_agent(
             gateway,
             args.model,
@@ -206,6 +238,10 @@ def main():
 
         ledger = CaseLedger()
         agent = ledger.wrap(agent)
+    elif args.memory == "task-ledger":
+        from .ledger import TaskLedger
+
+        agent = TaskLedger().wrap(agent)
     elif args.memory == "full-history":
         from .history import FullHistory
 
@@ -227,9 +263,11 @@ def main():
                 "crm": "stateless_crm",
                 "full-history": "full_history",
                 "ledger": "case_ledger",
+                "task-ledger": "task_ledger",
             }[args.memory],
             "case_sha256": case_hash,
             "temperature": 0,
+            "enable_thinking": gateway.enable_thinking,
             "model_calls": gateway.calls
             + (user_gateway.calls if user_gateway is not gateway else 0),
             "model_retries": gateway.retries

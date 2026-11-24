@@ -1,7 +1,112 @@
-"""Tool-backed Case Ledger for refund and cross-channel lifecycle cases."""
+"""Tool-backed task memory and the legacy Retail guard."""
 
 from copy import deepcopy
 from datetime import datetime, timedelta
+
+
+class TaskLedger:
+    """Project observed CRM records without reading or writing on the agent's behalf."""
+
+    def __init__(self):
+        self._tickets = {}
+        self._followups = {}
+
+    def wrap(self, agent):
+        def wrapped(session, call):
+            if session["trigger_type"] == "followup_due":
+                task_id = session.get("task_id", session["trigger_id"])
+                task = self._followups.setdefault(
+                    task_id,
+                    {
+                        "task_id": task_id,
+                        "ticket_id": session["ticket_id"],
+                        "due_at": session["t"],
+                        "note": session.get("note", ""),
+                    },
+                )
+                task["status"] = "fired"
+
+            def observe(tool, **args):
+                result = call(tool, **args)
+                self._record(tool, args, result, session["t"])
+                return result
+
+            projection = self._projection()
+            return agent({**session, "case_ledger": projection}, observe)
+
+        return wrapped
+
+    def _projection(self):
+        tickets = list(self._tickets.values())
+        return deepcopy(
+            {
+                "tickets": tickets,
+                "followups": list(self._followups.values()),
+                "commitments": [
+                    {"ticket_id": ticket["ticket_id"], "t": note["t"], "text": fragment}
+                    for ticket in tickets
+                    for note in ticket.get("notes", [])
+                    for fragment in _explicit_commitments(note["text"])
+                ],
+            }
+        )
+
+    def _record(self, tool, args, result, now):
+        ok = isinstance(result, dict) and result.get("ok") is True
+        if tool == "create_ticket" and isinstance(result, str):
+            self._tickets[result] = {
+                "ticket_id": result,
+                "status": "open",
+                "notes": [],
+                **deepcopy(args),
+            }
+        elif (
+            tool == "get_ticket" and isinstance(result, dict) and "ticket_id" in result
+        ):
+            self._remember_ticket(result)
+        elif tool == "search_tickets" and isinstance(result, list):
+            for ticket in result:
+                self._remember_ticket(ticket)
+        elif tool == "add_ticket_note" and ok:
+            ticket = self._tickets.setdefault(
+                args["ticket_id"], {"ticket_id": args["ticket_id"]}
+            )
+            ticket.setdefault("notes", []).append({"t": now, "text": args["text"]})
+        elif tool == "close_ticket" and ok:
+            ticket = self._tickets.setdefault(
+                args["ticket_id"], {"ticket_id": args["ticket_id"]}
+            )
+            ticket.update(
+                status="closed", resolution_code=args["resolution_code"], closed_at=now
+            )
+        elif tool == "schedule_followup" and isinstance(result, str):
+            self._followups[result] = {
+                "task_id": result,
+                "status": "pending",
+                **deepcopy(args),
+            }
+        elif tool == "list_followups" and isinstance(result, list):
+            self._followups.update((row["task_id"], deepcopy(row)) for row in result)
+        elif tool == "cancel_followup" and ok:
+            task = self._followups.setdefault(
+                args["task_id"], {"task_id": args["task_id"]}
+            )
+            task["status"] = "cancelled"
+
+    def _remember_ticket(self, row):
+        self._tickets[row["ticket_id"]] = {
+            **self._tickets.get(row["ticket_id"], {}),
+            **deepcopy(row),
+        }
+
+
+def _explicit_commitments(text):
+    """Recognize only author-labeled promises and retain their original wording."""
+    prefixes = ("承诺:", "承诺：", "commitment:", "promise:")
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.casefold().startswith(prefixes):
+            yield stripped
 
 
 class LifecycleLedger:

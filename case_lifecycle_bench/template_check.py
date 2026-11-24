@@ -6,11 +6,13 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from functools import partial
 
 from .environment import run_case
 from .eval_checks import benchmark_metrics
 from .evaluation import evaluate_case
 from .industries.insurance import renewal
+from .industries.service_cases import WORKFLOWS, workflow_agents
 from .lifecycle import _case_time
 
 WAKES = ("poll", "push")
@@ -47,6 +49,25 @@ TEMPLATES = {
         ),
     ),
 }
+
+for _name, _workflow in WORKFLOWS.items():
+    _agents = workflow_agents(_workflow)
+    TEMPLATES[_name] = Template(
+        partial(_workflow.generate, 300),
+        _workflow.generate,
+        _agents["oracle"],
+        (
+            (_agents["missed-initial-review"], "process", "initial_review_scheduled"),
+            (_agents["premature-action"], "process", "valid_actions_only"),
+            (_agents["missed-final-notice"], "outcome", "case_completed"),
+        ),
+        (
+            "initial_review_scheduled",
+            "all_milestones_completed",
+            "valid_actions_only",
+            "promise_followup_scheduled",
+        ),
+    )
 
 
 def _case_hash(case):

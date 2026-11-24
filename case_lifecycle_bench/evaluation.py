@@ -238,6 +238,11 @@ def evaluate_case(case: dict, run: dict) -> dict:
         from .industries.insurance.evaluation import evaluate_insurance
 
         return evaluate_insurance(case, run)
+    if case.get("industry") in {"credit", "field_service"}:
+        from .industries.service import evaluate_workflow
+        from .industries.service_cases import BY_TEMPLATE
+
+        return evaluate_workflow(BY_TEMPLATE[template], case, run)
     if template not in evaluators:
         raise ValueError(f"Unsupported evaluation template: {template}")
     return evaluators[template](case, run)

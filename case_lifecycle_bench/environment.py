@@ -20,6 +20,11 @@ def run_case(
         from .industries.insurance.environment import InsuranceEnvironment
 
         return InsuranceEnvironment(case, wake).run(agent)
+    if industry in {"credit", "field_service"}:
+        from .industries.service import ServiceEnvironment
+        from .industries.service_cases import BY_TEMPLATE
+
+        return ServiceEnvironment(case, wake, BY_TEMPLATE[case["template"]]).run(agent)
     if industry != "retail":
         raise ValueError(f"Unsupported industry: {industry}")
     return RetailEnvironment(case, wake, single_session).run(agent)

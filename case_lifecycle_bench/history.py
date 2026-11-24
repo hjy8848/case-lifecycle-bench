@@ -15,7 +15,7 @@ class FullHistory:
                 if key in session
             }
             records = prior["records"] = []
-            is_visit = session["trigger_type"] == "user_visit"
+            is_visit = session["trigger_type"] in {"user_visit", "outbound_contact"}
             if is_visit:
                 records.append({"role": "user", "text": session["message"]})
 
