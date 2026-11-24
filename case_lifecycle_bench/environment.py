@@ -8,9 +8,17 @@ from .lifecycle import LifecycleEnvironment, _VISIT, _iso
 
 
 def run_case(
-    case: dict, agent: Callable, *, wake: str = "poll", single_session: bool = False
+    case: dict,
+    agent: Callable,
+    *,
+    wake: str = "poll",
+    single_session: bool = False,
+    customer: Callable | None = None,
 ) -> dict:
-    """Run an isolated case. The callback receives only its current trigger and tools."""
+    """Run an isolated case. The callback receives only its current trigger and tools.
+
+    customer(visit, dialogue) voices outbound calls in cases with customer_mode "llm".
+    """
     if wake not in {"poll", "push"}:
         raise ValueError(f"Unknown wake mode: {wake!r}")
     if single_session and case["template"] != "cancel_partial_success":
@@ -23,7 +31,11 @@ def run_case(
     if industry in {"credit", "field_service"}:
         from .industries.service_cases import BY_TEMPLATE
 
-        return BY_TEMPLATE[case["template"]].environment(case, wake).run(agent)
+        return (
+            BY_TEMPLATE[case["template"]]
+            .environment(case, wake, customer=customer)
+            .run(agent)
+        )
     if industry != "retail":
         raise ValueError(f"Unsupported industry: {industry}")
     return RetailEnvironment(case, wake, single_session).run(agent)

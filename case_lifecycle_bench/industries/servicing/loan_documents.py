@@ -410,7 +410,7 @@ def never_escalate(session, call):
 
 
 def do_nothing(session, call):
-    return "LEFT" if session["trigger_type"] in {"user_visit", "outbound_contact"} else None
+    return "LEFT" if session["trigger_type"] == "user_visit" else None
 
 
 def close_early(session, call):

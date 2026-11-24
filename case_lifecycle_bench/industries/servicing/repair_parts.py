@@ -83,9 +83,14 @@ TOOLS = [
     _tool(
         "start_outbound_contact",
         "Start a proactive contact on a channel, voice or sms. If the customer "
-        "answers, the live call opens as a new session once you end this one; offer "
-        "and book slots in that session, not in this one.",
+        "answers, the call is live in this session until it ends and the result "
+        "carries what the customer says first.",
         {"customer_id": "string", "channel": "string"},
+    ),
+    _tool(
+        "say_to_customer",
+        "Speak to the customer on the live call and hear their reply.",
+        {"contact_id": "string", "text": "string"},
     ),
     _tool(
         "offer_available_slots",
@@ -358,11 +363,15 @@ def _run(
         else call("create_ticket", user_id=user_id, summary="空调维修等配件并预约上门", **subject)
     )
 
-    if kind == "outbound_contact":
-        contact_id = session["contact_id"]
+    def phone():
+        """Call the customer. The call is live in this session once answered."""
+        started = call("start_outbound_contact", customer_id=user_id, channel="voice")
+        contact_id = started.get("contact_id")
+        if started.get("status") != "answered":
+            return
         offer = call("offer_available_slots", contact_id=contact_id)
         if "slots" not in offer:
-            return "LEFT"
+            return
         slot = offer["customer_choice"]
         if wrong_slot:
             slot = next(s for s in offer["slots"] if s != offer["customer_choice"])
@@ -378,8 +387,6 @@ def _run(
                 if task["status"] == "pending":
                     call("cancel_followup", task_id=task["task_id"])
             call("close_ticket", ticket_id=ticket_id, resolution_code="booked")
-            return "CONFIRMED"
-        return "LEFT"
 
     ticket = call("get_ticket", ticket_id=ticket_id)
     notes = " ".join(note["text"] for note in ticket["notes"])
@@ -408,7 +415,7 @@ def _run(
             tell("已为您预约上门时段 D5 09:00-11:00，请留意师傅来电。")
         if book_early:
             call("read_contact_preferences", customer_id=user_id)
-            call("start_outbound_contact", customer_id=user_id, channel="voice")
+            phone()
             return None
         tell("您的配件正在调货途中，配件到货并核对型号一致后我们再与您确定上门时间，到货前暂时无法约时间。")
         call("add_ticket_note", ticket_id=ticket_id, text="配件在途，已告知客户到货核对后再约时间。")
@@ -420,7 +427,7 @@ def _run(
     if status == "arrived_match" and not record["appointment"]:
         if "已联系约时间" not in notes:
             call("add_ticket_note", ticket_id=ticket_id, text="配件已到且型号一致，已联系约时间。")
-            call("start_outbound_contact", customer_id=user_id, channel="voice")
+            phone()
         if visit:
             call("say", text="配件已到且型号一致，我们马上与您确认上门时段。")
     elif status == "arrived_mismatch":
@@ -465,12 +472,12 @@ def never_escalate(session, call):
 
 
 def do_nothing(session, call):
-    return "LEFT" if session["trigger_type"] in {"user_visit", "outbound_contact"} else None
+    return "LEFT" if session["trigger_type"] == "user_visit" else None
 
 
 def close_early(session, call):
     if session["trigger_type"] != "case_intake":
-        return "CONFIRMED" if session["trigger_type"] in {"user_visit", "outbound_contact"} else None
+        return "CONFIRMED" if session["trigger_type"] == "user_visit" else None
     user_id, subject = session["user_id"], {"subject_id": session["subject_id"]}
     ticket_id = call("create_ticket", user_id=user_id, summary="空调维修", **subject)
     call("send_message_to_user", user_id=user_id, channel="sms", text="已为您预约好上门时间，问题已解决。")

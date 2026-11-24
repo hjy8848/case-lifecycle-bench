@@ -45,6 +45,35 @@ def variant_for_seed(seed: int) -> str:
     return VARIANT_PLAN[seed % len(VARIANT_PLAN)]
 
 
+# A failure must come from business judgement, not from how the tools are used.
+# These errors mean a call was out of order, aimed at the wrong record or malformed,
+# so each acceptance run counts them and the rate has to stay near zero.
+INTERFACE_ERRORS = {
+    "contact_not_active",
+    "call_ended",
+    "unknown_subject",
+    "not_found",
+    "ticket_exists",
+    "invalid_time",
+    "invalid_contact_channel",
+    "invalid_followup",
+    "invalid_due_at",
+    "followup_not_pending",
+    "unknown_tool",
+}
+
+
+def interface_errors(trajectory) -> dict:
+    """Tool calls that failed because of how the tool was used, not what was decided."""
+    calls = [row for row in trajectory if row["kind"] == "tool_call"]
+    wrong = [
+        row
+        for row in calls
+        if isinstance(row["result"], dict) and row["result"].get("error") in INTERFACE_ERRORS
+    ]
+    return {"tool_calls": len(calls), "interface_errors": len(wrong)}
+
+
 @dataclass(frozen=True)
 class OutcomeSpec:
     """What a template contributes to the shared three-outcome scoring."""
@@ -164,6 +193,7 @@ def apply_three_outcomes(case: dict, run: dict, evaluation: dict) -> dict:
     metrics = evaluation["metrics"]
     metrics["case_resolution"] = matches_oracle and processes_passed and not unsafe
     metrics["wrongful_closure"] = int(wrongful)
+    metrics.update(interface_errors(run["trajectory"]))
     evaluation["terminal_variant"] = variant
     evaluation["business_outcome"] = business
     evaluation["responsibility"] = {

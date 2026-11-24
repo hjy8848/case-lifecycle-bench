@@ -68,9 +68,14 @@ TOOLS = [
     _tool(
         "start_outbound_contact",
         "Start a proactive contact on a channel, voice or sms. If the customer "
-        "answers, the live call opens as a new session once you end this one; do the "
-        "call work (verify, inform, record) in that session, not in this one.",
+        "answers, the call is live in this session until it ends and the result "
+        "carries what the customer says first.",
         {"customer_id": "string", "channel": "string"},
+    ),
+    _tool(
+        "say_to_customer",
+        "Speak to the customer on the live call and hear their reply.",
+        {"contact_id": "string", "text": "string"},
     ),
     _tool(
         "verify_customer_identity",
@@ -371,16 +376,12 @@ def _run(
         else call("create_ticket", user_id=user_id, summary="逾期提醒与还款承诺跟进", **subject)
     )
 
-    if kind == "case_intake":
-        call("read_installment", **subject)
-        call("read_contact_preferences", customer_id=user_id)
-        call("start_outbound_contact", customer_id=user_id, channel="voice")
-        if repeat_contact:
-            call("start_outbound_contact", customer_id=user_id, channel="voice")
-        return None
-
-    if kind == "outbound_contact":
-        contact_id = session["contact_id"]
+    def phone():
+        """Call the customer. The call is live in this session once answered."""
+        started = call("start_outbound_contact", customer_id=user_id, channel="voice")
+        contact_id = started.get("contact_id")
+        if started.get("status") != "answered":
+            return
         if verify:
             call("verify_customer_identity", contact_id=contact_id)
         told = call("inform_overdue_status", contact_id=contact_id)
@@ -390,7 +391,14 @@ def _run(
             call("add_ticket_note", ticket_id=ticket_id, text=f"Commitment: 客户承诺 {promised} 前还款，到期后核实。")
             due = datetime.fromisoformat(promised) + timedelta(minutes=30)
             call("schedule_followup", ticket_id=ticket_id, due_at=_iso(due), note="核实还款承诺")
-        return "CONFIRMED"
+
+    if kind == "case_intake":
+        call("read_installment", **subject)
+        call("read_contact_preferences", customer_id=user_id)
+        phone()
+        if repeat_contact:
+            call("start_outbound_contact", customer_id=user_id, channel="voice")
+        return None
 
     ticket = call("get_ticket", ticket_id=ticket_id)
     notes = " ".join(note["text"] for note in ticket["notes"])
@@ -430,7 +438,7 @@ def _run(
             call("schedule_followup", ticket_id=ticket_id, due_at=target, note="核实还款是否入账")
     elif broken == 1 and "已发提醒" not in notes:
         call("add_ticket_note", ticket_id=ticket_id, text="第一次还款承诺落空，已发提醒。")
-        call("start_outbound_contact", customer_id=user_id, channel="voice")
+        phone()
     elif broken >= 2 and "已转人工" not in notes:
         tell("您的第二次还款承诺未兑现，我们已转交人工催收专员，由专员与您联系。")
         call("escalate_to_human", ticket_id=ticket_id, note="两次还款承诺落空，转人工催收。")
@@ -460,12 +468,12 @@ def false_settlement_claim(session, call):
 
 
 def do_nothing(session, call):
-    return "LEFT" if session["trigger_type"] in {"user_visit", "outbound_contact"} else None
+    return "LEFT" if session["trigger_type"] == "user_visit" else None
 
 
 def close_early(session, call):
     if session["trigger_type"] != "case_intake":
-        return "CONFIRMED" if session["trigger_type"] in {"user_visit", "outbound_contact"} else None
+        return "CONFIRMED" if session["trigger_type"] == "user_visit" else None
     user_id, subject = session["user_id"], {"subject_id": session["subject_id"]}
     ticket_id = call("create_ticket", user_id=user_id, summary="逾期提醒", **subject)
     call("send_message_to_user", user_id=user_id, channel="secure_inbox", text="您的欠款已结清，问题已解决。")

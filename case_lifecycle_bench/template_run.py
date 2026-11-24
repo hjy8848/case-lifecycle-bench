@@ -21,7 +21,7 @@ from .environment import run_case
 from .eval_checks import benchmark_metrics
 from .evaluation import evaluate_case
 from .industries.service_cases import WORKFLOWS
-from .model_agent import ChatGateway, model_agent
+from .model_agent import ChatGateway, _customer_reply, model_agent
 from .outcomes import summarize_by_variant
 
 
@@ -45,6 +45,12 @@ def run_one(
         "temperature": 0,
         "enable_thinking": enable_thinking,
         "customer_mode": "llm" if llm_customer else "script",
+        # Tool descriptions and policy are frozen with the question set. A change shows
+        # up here, so a result can always be tied to the exact wording it was run with.
+        "tools_sha256": hashlib.sha256(
+            json.dumps(workflow.tools, sort_keys=True).encode()
+        ).hexdigest(),
+        "policy_sha256": hashlib.sha256(workflow.policy.encode()).hexdigest(),
         "case_sha256": hashlib.sha256(
             json.dumps(case, sort_keys=True).encode()
         ).hexdigest(),
@@ -63,9 +69,20 @@ def run_one(
         policy=workflow.policy,
         tools=workflow.tools,
     )
-    run = run_case(case, agent, wake=wake)
+    customer = None
+    if llm_customer:
+        # The simulator answers on outbound calls, with the same model and replica.
+        def customer(visit, dialogue):
+            return _customer_reply(gateway, user_model, visit, dialogue)
+
+    run = run_case(case, agent, wake=wake, customer=customer)
     evaluation = evaluate_case(case, run)
-    meta.update(model_calls=gateway.calls, model_retries=gateway.retries, api_base=base)
+    meta.update(
+        model_calls=gateway.calls,
+        model_retries=gateway.retries,
+        api_base=base,
+        invalid_arguments=agent.invalid_arguments,
+    )
     record = {
         "case_id": case["case_id"],
         "meta": meta,
@@ -89,8 +106,22 @@ def summarize(records):
         for row in records
     ]
     n = len(records)
+    calls = sum(row["evaluation"]["metrics"]["tool_calls"] for row in records)
+    wrong = sum(row["evaluation"]["metrics"]["interface_errors"] for row in records)
+    malformed = sum(row["meta"].get("invalid_arguments", 0) for row in records)
     return {
         "runs": n,
+        "interface": {
+            "tool_calls": calls,
+            "errors": wrong + malformed,
+            "error_rate": (wrong + malformed) / (calls + malformed) if calls else None,
+            "runs_with_an_error": sum(
+                row["evaluation"]["metrics"]["interface_errors"]
+                + row["meta"].get("invalid_arguments", 0)
+                > 0
+                for row in records
+            ),
+        },
         "responsibility": sum(bool(r["case_resolution"]) for r in rows),
         "unsafe": sum(
             bool(row["evaluation"]["metrics"]["unsafe_action_rate"]) for row in records

@@ -260,27 +260,6 @@ def _customer_reply(gateway, model, visit, dialogue):
     return reply
 
 
-def _contact_visit(case, session):
-    """The simulated customer of an outbound call, built from the instance's persona.
-
-    Contacts are named C1, C2, ... in order, so the call's index picks its scripted
-    entry; calls beyond the script use the instance's default contact. The persona
-    holds what the customer privately intends (a repayment date, a preferred slot).
-    """
-    script = case["init"].get("script", {})
-    index = int(session["contact_id"][1:]) - 1
-    contacts = script.get("contacts", [])
-    row = contacts[index] if index < len(contacts) else script.get("default_contact", {})
-    persona = row.get("persona")
-    if persona is None:
-        return None
-    return {
-        "goal": persona,
-        "channel": session["channel"],
-        "utterance": session["message"],
-    }
-
-
 def model_agent(
     gateway, model, user_model, case, *, user_gateway=None, policy=None, tools=TOOLS
 ):
@@ -290,15 +269,11 @@ def model_agent(
         user_gateway = gateway
 
     def agent(session, call):
-        visit = None
-        if user_model and session["trigger_type"] == "user_visit":
-            visit = visits.get(session["trigger_id"])
-        elif (
-            user_model
-            and session["trigger_type"] == "outbound_contact"
-            and case.get("customer_mode") == "llm"
-        ):
-            visit = _contact_visit(case, session)
+        visit = (
+            visits.get(session["trigger_id"])
+            if user_model and session["trigger_type"] == "user_visit"
+            else None
+        )
         context = {key: value for key, value in session.items() if key != "message"}
         session_policy = policy or (
             SINGLE_SESSION_POLICY if session.get("single_session") else POLICY
@@ -336,6 +311,7 @@ def model_agent(
                         return "LEFT" if visit is not None else None
                     result = call(name, **args)
                 except (KeyError, TypeError, ValueError):
+                    agent.invalid_arguments += 1
                     result = {"error": "invalid_arguments"}
                 messages.append(
                     {
@@ -357,4 +333,6 @@ def model_agent(
             dialogue.append({"customer": reply})
             messages.append({"role": "user", "content": reply})
 
+    # Malformed calls never reach the environment, so the agent counts them itself.
+    agent.invalid_arguments = 0
     return agent

@@ -2,9 +2,15 @@
 
 It adds what the credit and field-service cards have in common to the lifecycle
 engine: a case intake wake, one CRM ticket per subject, outbound contact with an
-opt-in, a daily window and a per-channel rolling limit, a live contact session
-with identity verification, notifications and handoffs to a human. A template
-subclass supplies its authoritative record, domain tools and world events.
+opt-in, a daily window and a per-channel rolling limit, a synchronous call with
+identity verification, notifications and handoffs to a human. A template subclass
+supplies its authoritative record, domain tools and world events.
+
+An outbound call is synchronous. When the customer answers, the call is live in the
+same session until it ends: the agent verifies, informs and speaks to the customer
+right away, as on a real phone call. A simulated customer, when one is supplied,
+answers what the agent says. Without one the customer follows the instance script
+and the scripted intent rides on the tool results.
 """
 
 from copy import deepcopy
@@ -20,12 +26,7 @@ from ...lifecycle import (
 )
 
 _INTAKE = _VISIT + 1
-_CONTACT = _VISIT + 2
-
-_LIVE_CALL_NOTE = (
-    "The live call opens as a new session after you end this one. Do the call work "
-    "(verify, inform, offer slots, book) in that session, and do not start another contact."
-)
+_TERMINAL = {"CONFIRMED", "LEFT", "UNRESOLVED"}
 
 # Errors that mean the agent broke a contact rule, as opposed to a plain failure.
 CONTACT_VIOLATIONS = {
@@ -39,14 +40,18 @@ CONTACT_VIOLATIONS = {
 class ServicingEnvironment(LifecycleEnvironment):
     contact_tools: tuple[str, ...] = ()
 
-    def __init__(self, case: dict, wake: str):
+    def __init__(self, case: dict, wake: str, customer=None):
         self.case_id = case["case_id"]
         # With a simulated customer, what they privately intend must reach the agent
         # only through what they say, never through a tool result.
         self.hide_customer_intent = case.get("customer_mode") == "llm"
+        # customer(visit, dialogue) -> reply text or a terminal token
+        self.customer = customer if self.hide_customer_intent else None
         self.contact_policy = case.get("contact_policy")
         self.script = deepcopy(case["init"].get("script", {}))
         self.contact_scripts = {}
+        self.dialogues = {}
+        self.ended_calls = set()
         super().__init__(case, wake, single_session=False)
         self._enqueue(_case_time(case["intake"]["t"]), _INTAKE, case["intake"])
 
@@ -87,17 +92,6 @@ class ServicingEnvironment(LifecycleEnvironment):
                 "trigger_id": "I1",
                 "note": payload["note"],
             }
-        elif priority == _CONTACT:
-            contact = self.state["contacts"][payload["contact_id"]]
-            trigger = {
-                "trigger_type": "outbound_contact",
-                "trigger_id": contact["contact_id"],
-                "contact_id": contact["contact_id"],
-                "channel": contact["channel"],
-                "message": self.contact_scripts[contact["contact_id"]].get(
-                    "opening", "你好，我接到了你们的来电。"
-                ),
-            }
         elif priority == _VISIT:
             if not self._visit_condition(payload.get("condition")):
                 return None, changes
@@ -113,20 +107,6 @@ class ServicingEnvironment(LifecycleEnvironment):
                 return None, changes
             return {**session, **self._event_subject()}, changes
         return self._session_context({**trigger, **self._event_subject()}), changes
-
-    def _run_session(self, agent, session_id, session, changes):
-        contact_id = session.get("contact_id")
-        if contact_id is not None:
-            changes = {
-                **changes,
-                "contacts": {
-                    contact_id: {
-                        **self.state["contacts"][contact_id],
-                        "session_id": session_id,
-                    }
-                },
-            }
-        super()._run_session(agent, session_id, session, changes)
 
     def _visit_condition(self, condition) -> bool:
         if condition is None:
@@ -182,17 +162,24 @@ class ServicingEnvironment(LifecycleEnvironment):
                 args["customer_id"], {"error": "not_found"}
             ), {}
         if tool == "start_outbound_contact":
-            return self._start_contact(**args)
+            return self._start_contact(session_id=session_id, **args)
         if tool == "send_message_to_user":
             return self._send_message(**args)
         if tool == "escalate_to_human":
             return self._escalate(**args)
-        if tool == "verify_customer_identity" or tool in self.contact_tools:
+        if (
+            tool in {"verify_customer_identity", "say_to_customer"}
+            or tool in self.contact_tools
+        ):
             contact = self.state["contacts"].get(args.get("contact_id"))
             if contact is None or contact["session_id"] != session_id:
-                return {"error": "contact_not_active", "note": _LIVE_CALL_NOTE}, {}
+                return {"error": "contact_not_active"}, {}
+            if contact["contact_id"] in self.ended_calls:
+                return {"error": "call_ended"}, {}
             if tool == "verify_customer_identity":
                 return self._verify_identity(contact)
+            if tool == "say_to_customer":
+                return self._say_to_customer(contact, args["text"])
             others = {key: value for key, value in args.items() if key != "contact_id"}
             return self._contact_tool(tool, contact, others)
         domain = self._domain_execute(tool, args, session_id)
@@ -266,7 +253,7 @@ class ServicingEnvironment(LifecycleEnvironment):
             }
         }
 
-    def _start_contact(self, customer_id, channel):
+    def _start_contact(self, customer_id, channel, session_id):
         policy = self.contact_policy
         if channel not in policy["channels"]:
             return {"error": "invalid_contact_channel"}, {}
@@ -304,7 +291,10 @@ class ServicingEnvironment(LifecycleEnvironment):
         self.contact_scripts[contact_id] = script
         result = {"contact_id": contact_id, "status": status}
         if status == "answered":
-            result["note"] = _LIVE_CALL_NOTE
+            # The call is live in this session until the session ends.
+            opening = script.get("opening", "你好，我接到了你们的来电。")
+            result["customer_says"] = opening
+            self.dialogues[contact_id] = [{"customer": opening}]
         return result, {
             "contacts": {
                 contact_id: {
@@ -314,11 +304,43 @@ class ServicingEnvironment(LifecycleEnvironment):
                     "channel": channel,
                     "status": status,
                     "started_at": _iso(self.t),
-                    "session_id": None,
+                    "session_id": session_id if status == "answered" else None,
                     "identity_verified": False,
                 }
             }
         }
+
+    def _say_to_customer(self, contact, text):
+        """The agent speaks on the live call; a simulated customer may answer."""
+        contact_id = contact["contact_id"]
+        dialogue = self.dialogues[contact_id]
+        dialogue.append({"agent": text})
+        if self.customer is None:
+            # A scripted customer has no voice; the intent rides on the tool results.
+            return {"delivered": True}, {}
+        script = self.contact_scripts[contact_id]
+        visit = {
+            "goal": script["persona"],
+            "channel": contact["channel"],
+            "utterance": dialogue[0]["customer"],
+        }
+        reply = self.customer(visit, dialogue)
+        if reply.upper() in _TERMINAL:
+            self.ended_calls.add(contact_id)
+            return {"delivered": True, "call_ended": True}, {}
+        dialogue.append({"customer": reply})
+        return {"delivered": True, "customer_says": reply}, {}
+
+    def _call_tool(self, tool, args, session_id, step):
+        result = super()._call_tool(tool, args, session_id, step)
+        # Put the spoken words in the trace so claims on a call are judged like chat.
+        if tool == "say_to_customer" and "delivered" in result:
+            self._log("message", session_id, role="agent", text=args["text"], step=step)
+            if result.get("customer_says"):
+                self._log(
+                    "message", session_id, role="user", text=result["customer_says"], step=step
+                )
+        return result
 
     def _verify_identity(self, contact):
         verified = self.contact_scripts[contact["contact_id"]].get(
@@ -337,7 +359,3 @@ class ServicingEnvironment(LifecycleEnvironment):
 
     def _react_to_tool(self, tool, args, changes):
         self._schedule_reactive_events(tool, args.get("subject_id"))
-        if tool == "start_outbound_contact":
-            contact_id, contact = next(iter(changes["contacts"].items()))
-            if contact["status"] == "answered":
-                self._enqueue(self.t, _CONTACT, {"contact_id": contact_id})
