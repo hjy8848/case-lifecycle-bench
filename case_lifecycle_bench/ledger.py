@@ -4,16 +4,11 @@ from copy import deepcopy
 from datetime import datetime, timedelta
 
 
-class CaseLedger:
-    """Carry one case's obligations and enforce checks through its public tools."""
+class LifecycleLedger:
+    """Apply an industry's ledger policy around the shared agent/tool callback."""
 
     def __init__(self):
         self.guard_events = []
-        self._tickets = {}
-        self._refunds = {}
-        self._obligations = {}
-        self._failure_notices = {}
-        self._followups = {}
 
     def wrap(self, agent):
         def wrapped(session, call):
@@ -30,7 +25,13 @@ class CaseLedger:
                     return observe(tool, **args)
                 identifiers = {
                     key: args[key]
-                    for key in ("ticket_id", "order_id", "refund_id")
+                    for key in (
+                        "ticket_id",
+                        "order_id",
+                        "refund_id",
+                        "policy_id",
+                        "subject_id",
+                    )
                     if isinstance(args.get(key), str)
                 }
                 self.guard_events.append(
@@ -48,6 +49,18 @@ class CaseLedger:
             return agent({**session, "case_ledger": self._projection()}, guarded_call)
 
         return wrapped
+
+
+class CaseLedger(LifecycleLedger):
+    """Carry one case's obligations and enforce checks through its public tools."""
+
+    def __init__(self):
+        super().__init__()
+        self._tickets = {}
+        self._refunds = {}
+        self._obligations = {}
+        self._failure_notices = {}
+        self._followups = {}
 
     def _reconcile(self, observe):
         open_tickets = [

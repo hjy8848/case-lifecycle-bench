@@ -142,53 +142,48 @@ def event_observation(trajectory, event_id, queries, deadline_delta):
     )
 
 
-def duty_detection_times(trajectory):
-    """Locate the first authoritative read that exposes each realized duty event."""
-    reads = (record for record in trajectory if record["kind"] == "tool_call")
-    by_tool = defaultdict(list)
-    for record in reads:
-        by_tool[record["tool"]].append(record)
-    refund_reads = sorted(
-        by_tool["get_refund"] + by_tool["list_refunds"], key=lambda row: row["seq"]
-    )
-    shipment_reads = by_tool["get_shipment"]
+# An authoritative read must expose the changed record and the observed state.
+DUTY_READS = {
+    "refunds": {
+        "get_refund": ("refund_id", "order_id", "status"),
+        "list_refunds": ("refund_id", "order_id", "status"),
+    },
+    "shipments": {"get_shipment": ("shipment_id", "status")},
+    "quotes": {"read_renewal_quote": ("policy_id", "status", "version")},
+}
+
+
+def _exposes_event(query, changes, read_specs):
+    result = query.get("result")
+    rows = result if isinstance(result, list) else [result]
+    for table, tools in read_specs.items():
+        fields = tools.get(query["tool"])
+        if fields and any(
+            isinstance(row, dict)
+            and all(field in row and row[field] == expected[field] for field in fields)
+            for row in rows
+            for expected in changes.get(table, {}).values()
+        ):
+            return True
+    return False
+
+
+def duty_detection_times(trajectory, read_specs=DUTY_READS):
+    """Measure from the world change and first actionable opportunity to the same read."""
+    queries = [record for record in trajectory if record["kind"] == "tool_call"]
     detections = []
     for event in trajectory:
         if event["kind"] != "world_event" or not event.get("duty"):
             continue
-        changes = event.get("changes", {})
-        refunds = changes.get("refunds", {})
-        shipments = changes.get("shipments", {})
-        observed = None
-        if refunds:
-            order_ids = {row["order_id"] for row in refunds.values()}
-            observed = next(
-                (
-                    query
-                    for query in refund_reads
-                    if query["seq"] > event["seq"]
-                    and any(
-                        row["refund_id"] in refunds
-                        and row["status"] == refunds[row["refund_id"]]["status"]
-                        for order_id in order_ids
-                        for row in refund_query(query, order_id)
-                    )
-                ),
-                None,
-            )
-        elif shipments:
-            observed = next(
-                (
-                    query
-                    for query in shipment_reads
-                    if query["seq"] > event["seq"]
-                    and isinstance(query.get("result"), dict)
-                    and query["result"].get("shipment_id") in shipments
-                    and query["result"].get("status")
-                    == shipments[query["result"]["shipment_id"]]["status"]
-                ),
-                None,
-            )
+        observed = next(
+            (
+                query
+                for query in queries
+                if query["seq"] > event["seq"]
+                and _exposes_event(query, event.get("changes", {}), read_specs)
+            ),
+            None,
+        )
         occurred_at = record_time(event)
         detected_at = record_time(observed) if observed is not None else None
         observable = event.get("t_observable")
@@ -211,3 +206,23 @@ def duty_detection_times(trajectory):
             }
         )
     return detections
+
+
+def benchmark_metrics(case, run, evaluation):
+    """Measure the same trajectory observables across industries."""
+    metrics = evaluation["metrics"]
+    duties = duty_detection_times(run["trajectory"])
+    conditional = {visit["id"] for visit in case["visits"] if visit.get("condition")}
+    return {
+        "conversation_success": metrics["conversation_success"],
+        "case_resolution": metrics["case_resolution"],
+        "unsafe_action": bool(metrics["unsafe_action_rate"]),
+        "duty_detection_rate": rate([duty["query_seq"] is not None for duty in duties]),
+        "duty_events": duties,
+        "conditional_revisits": sum(
+            row["kind"] == "session_start"
+            and row["trigger_type"] == "user_visit"
+            and row["trigger_id"] in conditional
+            for row in run["trajectory"]
+        ),
+    }

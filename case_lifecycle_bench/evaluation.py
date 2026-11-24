@@ -226,7 +226,7 @@ def evaluate_t1(case: dict, run: dict) -> dict:
 
 
 def evaluate_case(case: dict, run: dict) -> dict:
-    """Evaluate a supported v0 smoke-test template."""
+    """Evaluate any implemented lifecycle template through its business rules."""
     evaluators = {
         "refund_silent_failure": evaluate_t1,
         "refund_timeout_committed": evaluate_t2,
@@ -234,6 +234,10 @@ def evaluate_case(case: dict, run: dict) -> dict:
         "cross_channel_revisit": evaluate_t9,
     }
     template = case["template"]
+    if template == "insurance_renewal_quote_followup":
+        from .industries.insurance.evaluation import evaluate_insurance
+
+        return evaluate_insurance(case, run)
     if template not in evaluators:
         raise ValueError(f"Unsupported evaluation template: {template}")
     return evaluators[template](case, run)

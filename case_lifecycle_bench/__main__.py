@@ -118,14 +118,12 @@ def main():
 
     if args.memory == "ledger" and args.case not in {"t1", "t2", "t9"}:
         parser.error("--memory ledger is currently supported for T1, T2 and T9")
-    evaluator = evaluate_case
     if insurance:
         if args.memory != "crm" or args.user_model or args.retail_order:
             parser.error(
                 "insurance-renewal uses CRM, synthetic data and a scripted customer"
             )
         from .industries.insurance import renewal
-        from .industries.insurance.evaluation import evaluate_insurance
 
         try:
             case = renewal.renewal_case(
@@ -140,7 +138,6 @@ def main():
             "missing-quote-consent": renewal.missing_quote_consent,
             "missed-notification": renewal.missed_notification,
         }
-        evaluator = evaluate_insurance
     else:
         fixture, agents = CASES[args.case]
         case = fixture()
@@ -219,7 +216,7 @@ def main():
         "agent": args.model or args.agent,
         "wake": args.wake,
         "memory": args.memory,
-        "evaluation": evaluator(case, run),
+        "evaluation": evaluate_case(case, run),
     }
     if gateway is not None:
         result["meta"] = {

@@ -257,6 +257,15 @@ def evaluate_insurance(case: dict, run: dict) -> dict:
             )
         ]
 
+    proactive_attempts = [
+        attempt
+        for attempt in voice
+        if attempt["committed"]
+        and not attempt["violations"]
+        and "proactive_contact" in deadlines
+        and checks.record_time(attempt) <= deadlines["proactive_contact"]
+        and any(checks.before_session_action(read, [attempt]) for read in quote_reads)
+    ]
     proactive_deliveries = [
         delivery
         for delivery in deliveries
@@ -266,13 +275,14 @@ def evaluate_insurance(case: dict, run: dict) -> dict:
             attempt["contact_id"] == delivery["args"]["contact_id"]
             and attempt["outbound_session_start_seq"] is not None
             and attempt["outbound_session_start_seq"] < delivery["seq"]
-            and not attempt["violations"]
-            and any(
-                checks.before_session_action(read, [attempt]) for read in quote_reads
-            )
-            for attempt in voice
+            for attempt in proactive_attempts
         )
     ]
+    expected_contact = (
+        proactive_deliveries
+        if case["oracle"]["scripted_outbound_customer"]["answers"]
+        else proactive_attempts
+    )
     valid_policy_reads = [
         row
         for row in calls["read_policy"]
@@ -298,7 +308,7 @@ def evaluate_insurance(case: dict, run: dict) -> dict:
     process = {
         "initial_review_scheduled": bool(eligible_tasks),
         "initial_review_triggered": bool(review_starts),
-        "proactive_current_quote_contact": bool(review_starts and proactive_deliveries),
+        "proactive_current_quote_contact": bool(review_starts and expected_contact),
         "compliant_voice_contact": not any(row["violations"] for row in voice)
         and not identity_violations,
         "renewal_has_current_consent": all(

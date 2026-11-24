@@ -3,25 +3,22 @@
 from copy import deepcopy
 from datetime import datetime, time, timedelta
 
-from ...environment import _FOLLOWUP, _PUSH, _VISIT, _Environment, _case_time, _iso
+from ...lifecycle import (
+    LifecycleEnvironment,
+    _FOLLOWUP,
+    _PUSH,
+    _VISIT,
+    _case_time,
+    _iso,
+)
 
 
 _INTAKE = _VISIT + 1
 _OUTBOUND = _VISIT + 2
 _VOICE = "simulated_voice"
-_CRM_TOOLS = {
-    "get_current_time",
-    "get_ticket",
-    "list_followups",
-    "schedule_followup",
-    "cancel_followup",
-    "add_ticket_note",
-    "close_ticket",
-    "end_session",
-}
 
 
-class InsuranceEnvironment(_Environment):
+class InsuranceEnvironment(LifecycleEnvironment):
     def __init__(self, case: dict, wake: str):
         super().__init__(case, wake, single_session=False)
         self.contact_policy = case["contact_policy"]
@@ -54,7 +51,7 @@ class InsuranceEnvironment(_Environment):
         )
 
     def _trigger(self, priority, payload):
-        subject = {"customer_id": self.user_id, "policy_id": self.order_id}
+        subject = {"customer_id": self.user_id, "policy_id": self.subject_id}
         changes = {}
         if priority == _INTAKE:
             trigger = {
@@ -62,16 +59,11 @@ class InsuranceEnvironment(_Environment):
                 "trigger_id": payload.get("id", "I1"),
                 "note": payload["visible_note"],
             }
-        elif priority == _PUSH:
-            trigger = {
-                "trigger_type": "system_event",
-                "trigger_id": payload["id"],
-                "event_id": payload["id"],
-            }
-        elif priority == _FOLLOWUP:
-            trigger, changes = super()._trigger(priority, payload)
-            if trigger is None:
+        elif priority in {_PUSH, _FOLLOWUP}:
+            session, changes = super()._trigger(priority, payload)
+            if session is None:
                 return None, changes
+            return {"t": session["t"], **subject, **session}, changes
         elif priority == _OUTBOUND:
             contact_id = payload["contact_id"]
             trigger = {
@@ -117,8 +109,8 @@ class InsuranceEnvironment(_Environment):
             return True
         records = {
             "customer": self.state["customers"][self.user_id],
-            "policy": self.state["policies"][self.order_id],
-            "quote": self.state["quotes"][self.order_id],
+            "policy": self.state["policies"][self.subject_id],
+            "quote": self.state["quotes"][self.subject_id],
         }
 
         def field(path):
@@ -136,8 +128,8 @@ class InsuranceEnvironment(_Environment):
         return False
 
     def _world_event(self, event, *, in_session=False):
-        quote = self.state["quotes"][self.order_id]
-        changes = {"quotes": {self.order_id: {**quote, **event["changes"]["quote"]}}}
+        quote = self.state["quotes"][self.subject_id]
+        changes = {"quotes": {self.subject_id: {**quote, **event["changes"]["quote"]}}}
         self._record_world_event(
             {**event, "op": "insurance.quote_update"}, changes, in_session=in_session
         )
@@ -151,8 +143,6 @@ class InsuranceEnvironment(_Environment):
         if tool in reads:
             table, key = reads[tool]
             return self.state[table].get(args[key], {"error": "not_found"}), {}
-        if tool in _CRM_TOOLS:
-            return super()._execute(tool, args, session_id)
         if tool == "search_tickets":
             return self._find_tickets(**args), {}
         if tool == "create_ticket":
@@ -166,7 +156,7 @@ class InsuranceEnvironment(_Environment):
             "notify_renewal_confirmation": self._notify_confirmation,
         }
         if tool not in live_tools:
-            return {"error": "unknown_tool"}, {}
+            return super()._execute(tool, args, session_id)
         contact = self.state["contacts"].get(args["contact_id"])
         if contact is None or contact["session_id"] != session_id:
             return {"error": "contact_not_active"}, {}
@@ -184,7 +174,7 @@ class InsuranceEnvironment(_Environment):
         ]
 
     def _open_ticket(self, user_id, policy_id, summary):
-        if user_id != self.user_id or policy_id != self.order_id:
+        if user_id != self.user_id or policy_id != self.subject_id:
             return {"error": "not_found"}, {}
         ticket_id = self._new_id("tickets", "T")
         return ticket_id, {
@@ -207,7 +197,7 @@ class InsuranceEnvironment(_Environment):
         return {
             "contact_id": self._new_id("contacts", "C"),
             "customer_id": self.user_id,
-            "policy_id": self.order_id,
+            "policy_id": self.subject_id,
             "channel": channel,
             "status": status,
             "started_at": _iso(self.t),
@@ -228,7 +218,7 @@ class InsuranceEnvironment(_Environment):
             return {"error": "voice_contact_not_allowed"}, {}
         if (
             policy["prohibit_new_voice_attempt_after_renewal_confirmed"]
-            and self.state["policies"][self.order_id]["renewal_state"] == "confirmed"
+            and self.state["policies"][self.subject_id]["renewal_state"] == "confirmed"
         ):
             return {"error": "renewal_already_confirmed"}, {}
         if (
@@ -252,6 +242,9 @@ class InsuranceEnvironment(_Environment):
         }
 
     def _react_to_tool(self, tool, args, changes):
+        self._schedule_reactive_events(
+            tool, args.get("policy_id", args.get("customer_id"))
+        )
         if tool == "start_outbound_call":
             contact_id, contact = next(iter(changes["contacts"].items()))
             if contact["status"] == "answered":
@@ -379,7 +372,7 @@ class InsuranceEnvironment(_Environment):
             self._log("message", session_id, role="user", text=response, step=step)
         elif tool == "present_renewal_quote" and result.get("delivered"):
             revision = result["quote_version"]
-            credits = self.state["quotes"][self.order_id]["premium_test_credits"]
+            credits = self.state["quotes"][self.subject_id]["premium_test_credits"]
             self._log(
                 "message",
                 session_id,

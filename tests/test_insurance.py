@@ -1,6 +1,7 @@
 import unittest
 
 from case_lifecycle_bench.environment import run_case
+from case_lifecycle_bench.template_check import TEMPLATES, validate_template
 from case_lifecycle_bench.industries.insurance.evaluation import evaluate_insurance
 from case_lifecycle_bench.industries.insurance.renewal import (
     early_outreach,
@@ -12,6 +13,24 @@ from case_lifecycle_bench.industries.insurance.renewal import (
 
 
 class InsuranceRenewalEvaluationTest(unittest.TestCase):
+    def test_seeded_template_checks_both_modes_and_conditional_revisits(self):
+        spec = TEMPLATES["insurance-renewal"]
+        report = validate_template(spec, 300)
+        self.assertTrue(report["deterministic_passed"])
+        self.assertIsNone(report["model_smoke"])
+        self.assertEqual(len(report["generated"]), 10)
+        self.assertEqual(len(report["counterexamples"]), 6)
+        late_no_answer = next(row for row in report["generated"] if row["seed"] == 301)
+        self.assertEqual(late_no_answer["case"], spec.generate(301))
+        for wake, delay in (("poll", 17.5), ("push", 0)):
+            metrics = late_no_answer["oracle"][wake]["metrics"]
+            self.assertTrue(metrics["case_resolution"])
+            self.assertFalse(metrics["unsafe_action"])
+            self.assertEqual(metrics["conditional_revisits"], 1)
+            self.assertEqual(
+                metrics["duty_events"][0]["event_to_detection_hours"], delay
+            )
+
     def evaluate(self, agent, wake):
         case = renewal_case()
         run = run_case(case, agent, wake=wake)

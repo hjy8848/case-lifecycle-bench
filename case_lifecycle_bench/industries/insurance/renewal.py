@@ -3,8 +3,51 @@
 import json
 from datetime import datetime, time, timedelta
 from pathlib import Path
+from random import Random
 
-from ...environment import _case_time
+from ...lifecycle import _case_time
+
+_NO_ANSWER = "已尝试主动联系，客户未接听，等待客户通过安全聊天回访。"
+
+
+def generate_renewal_case(seed: int) -> dict:
+    """Vary quote timing, customer availability and synthetic identifier format."""
+    rng = Random(seed)
+    ready_at = rng.choice(
+        (
+            "D2 08:00",
+            "D2 08:15",
+            "D2 08:30",
+            "D2 08:45",
+            "D2 13:00",
+            "D2 14:00",
+            "D2 15:30",
+            "D2 17:00",
+        )
+    )
+    case = renewal_case(ready_at)
+    case["case_id"] = f"insurance_renewal_quote_followup_seed_{seed}"
+    number = rng.randrange(10**6, 10**7)
+    policy_id, customer_id = rng.choice(
+        (
+            (f"POL-{number}", f"CUS-{number}"),
+            (f"810001{number}", f"910001{number}"),
+            (f"#CLB-POL-{number}", f"#CLB-CUS-{number}"),
+        )
+    )
+    case["init"]["policy"]["policy_id"] = policy_id
+    case["init"]["customer"]["customer_id"] = customer_id
+    case["visits"][0]["t"] = rng.choice(("D3 14:00", "D3 15:00", "D3 17:00"))
+    script = case["oracle"]["scripted_outbound_customer"]
+    script["answers"] = rng.choice((True, True, False))
+    if not script["answers"]:
+        case["oracle"]["outreach"] = [
+            "Make one compliant call after checking the quote. If unanswered, record the attempt and handle the conditional secure-chat revisit."
+        ]
+        case["checks"]["process"][0]["evidence"][-1] = (
+            "a compliant timely voice attempt, followed by renewal in secure chat if unanswered"
+        )
+    return case
 
 
 def renewal_case(
@@ -91,7 +134,7 @@ def _act(session, call, *, early=False, submit_early=False, skip_notice=False):
     trigger = session["trigger_type"]
     policy_id = session["policy_id"]
     ticket_id = _ticket(session, call)
-    call("get_ticket", ticket_id=ticket_id)
+    ticket = call("get_ticket", ticket_id=ticket_id)
     policy = call("read_policy", policy_id=policy_id)
     quote = call("read_renewal_quote", policy_id=policy_id)
 
@@ -117,6 +160,8 @@ def _act(session, call, *, early=False, submit_early=False, skip_notice=False):
         now = datetime.fromisoformat(session["t"])
         if policy["renewal_state"] == "confirmed":
             return None
+        if any(note["text"] == _NO_ANSWER for note in ticket["notes"]):
+            return None
         if quote["status"] == "ready" and (
             time(9) <= now.time() < time(18) or early and trigger == "followup_due"
         ):
@@ -132,7 +177,9 @@ def _act(session, call, *, early=False, submit_early=False, skip_notice=False):
                     call(
                         "add_ticket_note",
                         ticket_id=ticket_id,
-                        text="主动联系未完成，续保仍待办理。",
+                        text=_NO_ANSWER
+                        if result.get("status") == "no_answer"
+                        else "主动联系未完成，续保仍待办理。",
                     )
         elif trigger == "followup_due" or not any(
             row["status"] == "pending"

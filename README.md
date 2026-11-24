@@ -45,6 +45,20 @@ python -m case_lifecycle_bench --case t3 --paired --agent premature-refund
 
 两版使用相同的初始状态和业务结果判据。即时完成的核实计入履约，仍待办的跟进继续标为未履约。模型在单会话版收到当场核实的时间规则，多会话版保留原来的跟进期限。
 
+## 模板生成与验收
+
+每个模板先定义时间线、业务事件和客户回访条件。生成器用固定种子产出 10 个实例，改变事件时点、客户反应及合成标识。验收入口要求 Oracle 在 Poll-only 和 Event-push 下逐条通过所有适用检查，并要求 2–3 个反例在两种模式下触发各自的评分项。真实模型轨迹用于检查模型是否实际走到关键业务步骤，并供人工判断难度。
+
+```powershell
+python -m case_lifecycle_bench.template_check --template insurance-renewal --seed 300
+```
+
+`--output` 可保存生成实例和评分证据。用 `--smoke-trace <轨迹.json>` 复算真实模型试跑，轨迹需带用例哈希、模型 ID 和调用次数。
+
+- [生命周期引擎](case_lifecycle_bench/lifecycle.py) 维护虚拟时钟、事件触发、唤醒、工具轨迹和 CRM 跟进。行业提供业务状态、工具以及允许的状态变化。
+- [共同评分函数](case_lifecycle_bench/eval_checks.py) 使用同一条轨迹计算对话成功、事件查证延迟和条件回访等观测量。查证必须读到事件改变后的权威记录。结案和违规谓词由模板定义。
+- 新模板在 [验收入口](case_lifecycle_bench/template_check.py) 登记生成器、Oracle、反例和必过的业务检查。Ledger 复用 [会话包装器](case_lifecycle_bench/ledger.py)，各行业在同一入口提供自身的义务和规则。
+
 ## T3 随机订单号对照
 
 用种子 1–30 各生成一对订单。每对共用客户号、退款金额和 T3 流程，订单号分别使用 `#W` 格式和 13 位纯数字。运行后按格式报告实际写入的拦截前退款、首次违规所在会话及 Wilson 95% 区间。先设置已有推理网关，再执行：
