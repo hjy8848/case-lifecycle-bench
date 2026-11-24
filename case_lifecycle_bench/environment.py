@@ -1,4 +1,4 @@
-"""Deterministic retail lifecycle environment for the smoke-test cases."""
+"""Deterministic lifecycle scheduler and Retail environment."""
 
 import re
 from collections import Counter
@@ -51,6 +51,10 @@ def run_case(
         raise ValueError(f"Unknown wake mode: {wake!r}")
     if single_session and case["template"] != "cancel_partial_success":
         raise ValueError("Single-session comparison requires a T3 case")
+    if case.get("industry") == "insurance":
+        from .industries.insurance.environment import InsuranceEnvironment
+
+        return InsuranceEnvironment(case, wake).run(agent)
     return _Environment(case, wake, single_session).run(agent)
 
 
@@ -70,10 +74,7 @@ class _Environment:
             (fault["tool"], fault["nth"]): fault["mode"]
             for fault in case.get("faults", [])
         }
-        init = case["init"]
-        self.user_id = init["user"]
-        self.order_id = init["order"]
-        self.state = retail_initial_state(init, _iso(self.t))
+        self.user_id, self.order_id, self.state = self._initial_state(case["init"])
         for visit in case["visits"]:
             self._enqueue(_case_time(visit["t"]), _VISIT, visit)
         for event in case["events"]:
@@ -81,6 +82,9 @@ class _Environment:
                 self.reactive_events.append(event)
             else:
                 self._enqueue(_case_time(event["t"]), _WORLD, event)
+
+    def _initial_state(self, init: dict) -> tuple[str, str, dict]:
+        return init["user"], init["order"], retail_initial_state(init, _iso(self.t))
 
     def _enqueue(self, t: datetime, priority: int, payload: dict) -> None:
         heappush(self.queue, (t, priority, next(self.queue_order), payload))
@@ -183,9 +187,11 @@ class _Environment:
         self.waiting_events.clear()
         self._apply(changes)
         start = {key: session[key] for key in ("trigger_type", "trigger_id")}
-        is_visit = session["trigger_type"] == "user_visit"
+        is_visit = session["trigger_type"] in {"user_visit", "outbound_contact"}
         if is_visit:
             start["channel"] = session["channel"]
+            if "contact_id" in session:
+                start["contact_id"] = session["contact_id"]
         if changes:
             start["changes"] = changes
         self._log("session_start", session_id, **start)
@@ -566,6 +572,11 @@ class _Environment:
             changes = self._shipment_event(event)
         else:
             changes = self._refund_event(event)
+        self._record_world_event(event, changes, in_session=in_session)
+
+    def _record_world_event(
+        self, event: dict, changes: dict, *, in_session: bool = False
+    ) -> None:
         # An event with no business effect carries no realized detection duty.
         applied = bool(changes)
         notify_agent = event.get("notify_agent", False)

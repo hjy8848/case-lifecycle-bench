@@ -12,7 +12,7 @@ _RETRY_STATUS = {408, 429, 500, 502, 503, 504}
 _RETRY_DELAYS = (2, 4, 8, 16, 32)
 
 
-POLICY = """You are a retail support agent. The context starts fresh with each wake.
+_POLICY = """You are a retail support agent. {session_setup}
 Use the CRM to continue existing cases. Look up a case by customer before creating
 a ticket, and write notes with the state and pending duties before ending a session.
 OMS is authoritative for order contents and amounts; the payment gateway is
@@ -21,23 +21,37 @@ capability; the carrier is authoritative for parcel location and interception.
 Only perform customer-requested writes with explicit confirmation. When a write
 times out or its result is unknown, query the authoritative state before retrying.
 Use issue_refund for a new refund only if none is processing or succeeded. Retry
-a failed refund using retry_refund with its original ID. After issuing or retrying
-a refund, schedule a follow-up within 48h to verify the payment result.
+a failed refund using retry_refund with its original ID. {refund_check}
 Order cancellation requires two separate actions. First, check get_order_details.
 If OMS reports pending, call cancel_pending_order after the customer's confirmation,
 even if 3PL reports shipped. Second, check get_fulfillment_status and call
 cancel_fulfillment to cancel unshipped fulfillment or request interception.
 Only report full cancellation after verifying both the OMS cancellation and the
-fulfillment cancellation or carrier interception. If shipped, track the
-interception within 24h and recheck within another 24h if pending. Refund a
+fulfillment cancellation or carrier interception. {interception_check} Refund a
 shipped order only once the parcel is intercepted or returned.
 Send important changes and final results with send_message_to_user. Close a ticket
 only after verifying the result, notifying the customer, and clearing pending
-follow-ups. Schedule any promised follow-ups no later than their deadlines.
+follow-ups. {followup_deadline}
 Avoid promising dates of bank settlement. Use ISO virtual time without a time
-zone. During a follow-up or system wake there is no live user. End such sessions
-with end_session once the current work is done. For live chat, respond in Chinese.
+zone. {session_ending}For live chat, respond in Chinese.
 """
+
+POLICY = _POLICY.format(
+    session_setup="The context starts fresh with each wake.",
+    refund_check="After issuing or retrying\na refund, schedule a follow-up within 48h to verify the payment result.",
+    interception_check="If shipped, track the\ninterception within 24h and recheck within another 24h if pending.",
+    followup_deadline="Schedule any promised follow-ups no later than their deadlines.",
+    session_ending="During a follow-up or system wake there is no live user. End such sessions\nwith end_session once the current work is done. ",
+)
+
+SINGLE_SESSION_POLICY = _POLICY.format(
+    session_setup="This Case runs in one conversation, with no later wakes.\n"
+    "External results can take effect during this session after their prerequisites are met.",
+    refund_check="After issuing or retrying a refund, query the payment gateway again in this conversation to verify its status.",
+    interception_check="If shipped, query the carrier result in this conversation after requesting interception.",
+    followup_deadline="Complete required verification with the same tools during this conversation.",
+    session_ending="",
+)
 
 
 def _tool(name, description, required=None, optional=None):
@@ -252,8 +266,9 @@ def model_agent(gateway, model, user_model, case, *, user_gateway=None):
             else None
         )
         context = {key: value for key, value in session.items() if key != "message"}
+        policy = SINGLE_SESSION_POLICY if session.get("single_session") else POLICY
         messages = [
-            {"role": "system", "content": POLICY},
+            {"role": "system", "content": policy},
             {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
         ]
         dialogue = []

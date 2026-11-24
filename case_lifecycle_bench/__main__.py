@@ -35,7 +35,7 @@ CASES = {
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--case", choices=CASES, default="t1")
+    parser.add_argument("--case", choices=(*CASES, "insurance-renewal"), default="t1")
     parser.add_argument("--wake", choices=("poll", "push"), default="poll")
     parser.add_argument("--agent", default="oracle")
     parser.add_argument(
@@ -105,7 +105,25 @@ def main():
 
     if args.memory == "ledger" and args.case not in {"t1", "t2", "t9"}:
         parser.error("--memory ledger is currently supported for T1, T2 and T9")
-    fixture, agents = CASES[args.case]
+    evaluator = evaluate_case
+    if args.case == "insurance-renewal":
+        if args.memory != "crm" or args.model or args.user_model or args.retail_order:
+            parser.error(
+                "insurance-renewal supports scripted agents and synthetic data"
+            )
+        from .industries.insurance import renewal
+        from .industries.insurance.evaluation import evaluate_insurance
+
+        fixture = renewal.renewal_case
+        agents = {
+            "oracle": renewal.oracle,
+            "early-outreach": renewal.early_outreach,
+            "missing-quote-consent": renewal.missing_quote_consent,
+            "missed-notification": renewal.missed_notification,
+        }
+        evaluator = evaluate_insurance
+    else:
+        fixture, agents = CASES[args.case]
     case = fixture()
     if args.retail_order:
         try:
@@ -172,7 +190,7 @@ def main():
         "agent": args.model or args.agent,
         "wake": args.wake,
         "memory": args.memory,
-        "evaluation": evaluate_case(case, run),
+        "evaluation": evaluator(case, run),
     }
     if gateway is not None:
         result["meta"] = {

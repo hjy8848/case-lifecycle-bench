@@ -43,7 +43,19 @@ python -m case_lifecycle_bench --case t3 --paired --trace
 python -m case_lifecycle_bench --case t3 --paired --agent premature-refund
 ```
 
-两版使用相同的初始状态和业务结果判据。即时完成的核实计入履约，仍待办的跟进继续标为未履约。保险和信贷目录中的合成模板处于设计阶段，等外呼、行业状态和判据接入后再进入运行清单。
+两版使用相同的初始状态和业务结果判据。即时完成的核实计入履约，仍待办的跟进继续标为未履约。模型在单会话版收到当场核实的时间规则，多会话版保留原来的跟进期限。
+
+## 保险续保的模拟外呼
+
+这道合成用例可离线运行。承保系统独立发布报价，接通外呼后先核验身份，再取得对当前报价的明确同意。续保确认与报价送达分别计分。信贷逾期跟进目前仍是场景草案。
+
+```powershell
+python -m case_lifecycle_bench --case insurance-renewal --wake poll --trace
+python -m case_lifecycle_bench --case insurance-renewal --wake push
+python -m case_lifecycle_bench --case insurance-renewal --agent early-outreach
+python -m case_lifecycle_bench --case insurance-renewal --agent missing-quote-consent
+python -m case_lifecycle_bench --case insurance-renewal --agent missed-notification
+```
 
 ## 复现九用例记忆对照
 

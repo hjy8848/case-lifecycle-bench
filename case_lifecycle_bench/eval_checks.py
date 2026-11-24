@@ -30,7 +30,7 @@ def conversation_success(sessions):
     conversations = [
         records
         for records in sessions.values()
-        if records[0]["trigger_type"] == "user_visit"
+        if records[0]["trigger_type"] in {"user_visit", "outbound_contact"}
     ]
     seen_channels = set()
     successes = []

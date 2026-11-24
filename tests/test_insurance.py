@@ -1,0 +1,75 @@
+import unittest
+
+from case_lifecycle_bench.environment import run_case
+from case_lifecycle_bench.industries.insurance.evaluation import evaluate_insurance
+from case_lifecycle_bench.industries.insurance.renewal import (
+    early_outreach,
+    missed_notification,
+    missing_quote_consent,
+    oracle,
+    renewal_case,
+)
+
+
+class InsuranceRenewalEvaluationTest(unittest.TestCase):
+    def evaluate(self, agent, wake):
+        case = renewal_case()
+        run = run_case(case, agent, wake=wake)
+        return evaluate_insurance(case, run)
+
+    def test_oracle_completes_before_conditional_revisit_in_both_modes(self):
+        for wake in ("poll", "push"):
+            with self.subTest(wake=wake):
+                result = self.evaluate(oracle, wake)
+                self.assertTrue(result["outcome"]["current_quote_confirmed"])
+                self.assertTrue(result["process"]["proactive_current_quote_contact"])
+                self.assertTrue(result["process"]["compliant_voice_contact"])
+                self.assertTrue(result["process"]["renewal_has_current_consent"])
+                self.assertTrue(
+                    result["process"]["customer_notified_after_verification"]
+                )
+                self.assertTrue(result["metrics"]["case_resolution"])
+                self.assertEqual(result["metrics"]["conversation_success"], 1)
+                self.assertEqual(result["metrics"]["unsafe_action_rate"], 0)
+                self.assertFalse(result["evidence"]["revisit_triggered"])
+                [voice] = result["evidence"]["voice_attempts"]
+                self.assertTrue(voice["committed"])
+                self.assertLess(voice["seq"], voice["outbound_session_start_seq"])
+
+    def test_early_attempt_is_unsafe_even_when_no_call_is_placed(self):
+        for wake in ("poll", "push"):
+            with self.subTest(wake=wake):
+                result = self.evaluate(early_outreach, wake)
+                self.assertFalse(result["process"]["compliant_voice_contact"])
+                self.assertFalse(result["process"]["proactive_current_quote_contact"])
+                self.assertEqual(result["metrics"]["unsafe_action_rate"], 1)
+                self.assertTrue(result["evidence"]["revisit_triggered"])
+                [early] = result["evidence"]["voice_attempts"]
+                self.assertIn("outside_contact_window", early["violations"])
+                self.assertFalse(early["committed"])
+                self.assertIsNone(early["outbound_session_start_seq"])
+
+    def test_preconsent_attempt_is_audited_separately_from_later_commit(self):
+        for wake in ("poll", "push"):
+            with self.subTest(wake=wake):
+                result = self.evaluate(missing_quote_consent, wake)
+                self.assertFalse(result["process"]["renewal_has_current_consent"])
+                self.assertEqual(result["metrics"]["unsafe_action_rate"], 1)
+                attempted, recovered = result["evidence"]["renewal_attempts"]
+                self.assertFalse(attempted["prior_current_consent"])
+                self.assertFalse(attempted["committed"])
+                self.assertTrue(recovered["prior_current_consent"])
+                self.assertTrue(recovered["committed"])
+
+    def test_missing_final_notice_triggers_revisit_and_keeps_case_open(self):
+        for wake in ("poll", "push"):
+            with self.subTest(wake=wake):
+                result = self.evaluate(missed_notification, wake)
+                self.assertTrue(result["outcome"]["current_quote_accepted"])
+                self.assertTrue(result["outcome"]["current_quote_delivered"])
+                self.assertFalse(result["outcome"]["renewal_confirmation_delivered"])
+                self.assertFalse(
+                    result["process"]["customer_notified_after_verification"]
+                )
+                self.assertFalse(result["metrics"]["case_resolution"])
+                self.assertTrue(result["evidence"]["revisit_triggered"])

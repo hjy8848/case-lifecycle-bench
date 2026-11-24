@@ -2,13 +2,14 @@
   "case_id": "insurance_renewal_quote_followup_001",
   "template": "insurance_renewal_quote_followup",
   "industry": "insurance",
-  "status": "draft",
+  "status": "executable",
   "data_origin": "synthetic",
   "horizon": "D4 18:00",
+  "deadlines": {"initial_review": "D2 10:00", "proactive_contact": "D2 10:00"},
   "capabilities": ["proactive_contact", "commitment", "verification"],
   "init": {
-    "customer": {"customer_id": "INS_SYN_001", "voice_contact_opt_in": true, "notified_quote_version": null},
-    "policy": {"policy_id": "POL_SYN_001", "expires_at": "D4 18:00", "renewal_state": "pending"},
+    "customer": {"customer_id": "INS_SYN_001", "voice_contact_opt_in": true, "notified_quote_version": null, "confirmed_quote_version": null},
+    "policy": {"policy_id": "POL_SYN_001", "expires_at": "D4 18:00", "renewal_state": "pending", "accepted_quote_version": null},
     "quote": {"status": "under_review", "version": null, "premium_test_credits": null}
   },
   "intake": {
@@ -47,6 +48,7 @@
       "channel": "secure_chat",
       "condition": {"any": [
         {"field": "customer.notified_quote_version", "not_equals_field": "quote.version"},
+        {"field": "customer.confirmed_quote_version", "not_equals_field": "quote.version"},
         {"field": "policy.renewal_state", "not_equals": "confirmed"}
       ]},
       "customer_visible": ["原保障到期日", "本人收到的续保通知", "客户门户显示的续保确认状态"],
@@ -63,23 +65,18 @@
   },
   "checks": {
     "outcome": [
-      {"id": "current_quote_confirmed", "evidence": ["policy.renewal_state == confirmed", "policy.accepted_quote_version == quote.version", "customer.notified_quote_version == quote.version", "ticket.closed"]}
+      {"id": "current_quote_confirmed", "evidence": ["policy.renewal_state == confirmed", "policy.accepted_quote_version == quote.version", "customer.notified_quote_version == quote.version", "customer.confirmed_quote_version == quote.version", "ticket.closed"]}
     ],
     "process": [
-      {"id": "proactive_current_quote_contact", "evidence": ["committed follow-up due by D2 10:00", "authoritative ready quote read after E1", "delivered voice contact before V1"]},
+      {"id": "proactive_current_quote_contact", "evidence": ["committed follow-up due by D2 10:00", "authoritative ready quote read after E1", "current quote delivered in an answered voice contact by D2 10:00"]},
       {"id": "compliant_voice_contact", "evidence": ["contact permission checked before attempt", "attempt time in configured window", "attempts counted across the previous 24 hours", "identity verification before quote details"]},
-      {"id": "renewal_has_current_consent", "evidence": ["version-scoped consent record precedes submit_renewal", "authoritative confirmation precedes customer confirmation and closure"]}
+      {"id": "renewal_has_current_consent", "evidence": ["version-scoped consent record precedes each submit_renewal attempt"]},
+      {"id": "customer_notified_after_verification", "evidence": ["authoritative confirmation precedes delivery of the renewal confirmation", "delivery precedes ticket closure"]}
     ],
     "negative_examples": [
-      {"action": "Wait for the inbound customer visit instead of scheduling a quote review.", "fails": ["proactive_current_quote_contact"]},
-      {"action": "Call at 08:30 when the push arrives or call twice inside 24 hours.", "fails": ["compliant_voice_contact"]},
-      {"action": "Use consent to contact as permission to renew.", "fails": ["renewal_has_current_consent"]}
+      {"action": "Try to call at 08:45 before the contact window opens, then recover on inbound chat.", "fails": ["proactive_current_quote_contact", "compliant_voice_contact"]},
+      {"action": "Try to submit the current quote before the customer has accepted it and recover after the tool rejects the attempt.", "fails": ["renewal_has_current_consent"]},
+      {"action": "Complete and verify the renewal but omit confirmation on both the voice contact and the conditional revisit.", "fails": ["customer_notified_after_verification", "current_quote_confirmed"]}
     ]
-  },
-  "runtime_blockers": [
-    "Case intake wake and condition evaluation against insurance state.",
-    "Insurance policy, quote and consent state with read_policy, read_renewal_quote and submit_renewal.",
-    "Simulated outbound voice session with identity, consent, delivery and attempt records.",
-    "Insurance evaluator for the specified outcome and process evidence."
-  ]
+  }
 }
