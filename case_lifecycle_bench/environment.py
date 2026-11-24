@@ -103,10 +103,25 @@ class RetailEnvironment(LifecycleEnvironment):
             "issue_refund": self._issue_refund,
             "retry_refund": self._retry_refund,
             "send_message_to_user": self._send_message,
+            "escalate_to_human": self._escalate_to_human,
         }
         if tool not in writes:
             return super()._execute(tool, args, session_id)
         return writes[tool](**args)
+
+    def _escalate_to_human(self, ticket_id: str, note: str) -> tuple:
+        if ticket_id not in self.state["tickets"]:
+            return {"error": "not_found"}, {}
+        handoff_id = self._new_id("handoffs", "H")
+        row = {
+            "handoff_id": handoff_id,
+            "ticket_id": ticket_id,
+            "note": note,
+            "status": "pending",
+            "decision": None,
+            "returned_at": None,
+        }
+        return handoff_id, {"handoffs": {handoff_id: row}}
 
     def _create_ticket(self, user_id: str, order_ids: list[str], summary: str) -> tuple:
         if user_id not in self.state["users"] or any(
@@ -271,14 +286,24 @@ class RetailEnvironment(LifecycleEnvironment):
 
     def _shipment_event(self, event: dict) -> dict:
         match = re.fullmatch(
-            r"shipment\.set_status\(([^()]+),\s*intercepted\)", event["op"]
+            r"shipment\.set_status\(([^()]+),\s*(intercepted|delivered)\)",
+            event["op"],
         )
         if not match:
             raise ValueError(f"Unsupported world event: {event['op']!r}")
-        order_id = match[1]
+        order_id, status = match.groups()
         shipment = self._shipment(order_id)
         if shipment is None or shipment["status"] != "intercept_requested":
             return {}
+        if status == "delivered":
+            # The carrier could not stop the parcel, so OMS and 3PL stay unsynced.
+            return {
+                "shipments": {
+                    shipment["shipment_id"]: self._shipment_status(
+                        shipment, "delivered"
+                    )
+                }
+            }
         fulfillment = self.state["fulfillment"][order_id]
         return {
             "shipments": {

@@ -28,7 +28,9 @@ even if 3PL reports shipped. Second, check get_fulfillment_status and call
 cancel_fulfillment to cancel unshipped fulfillment or request interception.
 Only report full cancellation after verifying both the OMS cancellation and the
 fulfillment cancellation or carrier interception. {interception_check} Refund a
-shipped order only once the parcel is intercepted or returned.
+shipped order only once the parcel is intercepted or returned. If the carrier
+reports the parcel delivered despite the request, do not refund: hand the ticket
+to the returns team with escalate_to_human and tell the customer.
 Send important changes and final results with send_message_to_user. Close a ticket
 only after verifying the result, notifying the customer, and clearing pending
 follow-ups. {followup_deadline}
@@ -159,6 +161,11 @@ TOOLS = [
         "send_message_to_user",
         "Send a user notification.",
         {"user_id": "string", "channel": "string", "text": "string"},
+    ),
+    _tool(
+        "escalate_to_human",
+        "Hand a ticket to a human team with a handoff note. The case stays open.",
+        {"ticket_id": "string", "note": "string"},
     ),
     _tool("end_session", "Finish the current session."),
 ]

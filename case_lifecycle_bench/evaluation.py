@@ -4,6 +4,8 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 
 from . import eval_checks as checks
+from .lifecycle import _case_time
+from .outcomes import apply_three_outcomes, completion_claims
 
 _REFUND_DEADLINE = timedelta(hours=48)
 _ACTIVE_REFUND_STATES = {"processing", "succeeded"}
@@ -237,15 +239,18 @@ def evaluate_case(case: dict, run: dict) -> dict:
     if template == "insurance_renewal_quote_followup":
         from .industries.insurance.evaluation import evaluate_insurance
 
-        return evaluate_insurance(case, run)
-    if case.get("industry") in {"credit", "field_service"}:
+        evaluation = evaluate_insurance(case, run)
+    elif case.get("industry") in {"credit", "field_service"}:
         from .industries.service import evaluate_workflow
         from .industries.service_cases import BY_TEMPLATE
 
-        return evaluate_workflow(BY_TEMPLATE[template], case, run)
-    if template not in evaluators:
+        evaluation = evaluate_workflow(BY_TEMPLATE[template], case, run)
+    elif template in evaluators:
+        evaluation = evaluators[template](case, run)
+    else:
         raise ValueError(f"Unsupported evaluation template: {template}")
-    return evaluators[template](case, run)
+    # Cases with a terminal_variant score responsibility, not business success.
+    return apply_three_outcomes(case, run, evaluation)
 
 
 def _evaluation_result(
@@ -612,6 +617,18 @@ def evaluate_t3(case: dict, run: dict) -> dict:
     intercept_queries = [
         row for row in ship_queries if row["result"]["status"] == "intercepted"
     ]
+    delivered_queries = [
+        row for row in ship_queries if row["result"]["status"] == "delivered"
+    ]
+    pending_queries = [
+        row for row in ship_queries if row["result"]["status"] == "intercept_requested"
+    ]
+    handoffs = [
+        row for row in actions["escalate_to_human"] if row["args"].get("ticket_id") in tickets
+    ]
+    closes = [
+        row for row in actions["close_ticket"] if row["args"].get("ticket_id") in tickets
+    ]
     notifications = checks.notifications_to(actions, user_id)
     outbound = [
         row for row in trajectory if row["kind"] == "message" and row["role"] == "agent"
@@ -662,11 +679,12 @@ def evaluate_t3(case: dict, run: dict) -> dict:
         for row in requests
     ]
     pending_checks = {}
-    for row in ship_queries:
-        if row["result"]["status"] == "intercept_requested":
-            pending_checks[row["session_id"]] = checks.followup_check(
-                row, schedules, tickets, ship_queries, _INTERCEPT_DEADLINE
-            )
+    pending_rows = {}
+    for row in pending_queries:
+        pending_rows[row["session_id"]] = row
+        pending_checks[row["session_id"]] = checks.followup_check(
+            row, schedules, tickets, ship_queries, _INTERCEPT_DEADLINE
+        )
     intercept_tasks = {
         task_id
         for task_ids, _ in initial_checks + list(pending_checks.values())
@@ -695,6 +713,60 @@ def evaluate_t3(case: dict, run: dict) -> dict:
         ),
         "notified_after_interception": bool(final_notifications),
     }
+    variant = case.get("terminal_variant")
+    open_followups = [
+        row
+        for row in state["followups"].values()
+        if row["ticket_id"] in tickets and row["status"] == "pending"
+    ]
+    if variant is not None:
+        process["no_false_completion_claim"] = not _t3_false_claims(
+            trajectory, run["initial_state"], order_id
+        )
+        process["no_unneeded_escalation"] = variant == "escalate" or not handoffs
+        if variant == "resolved":
+            settled = [
+                row
+                for row, found in refund_queries
+                if any(refund["status"] == "succeeded" for refund in found)
+            ]
+            after_settlement = checks.notifications_after(notifications, settled)
+            process["closed_after_refund_notification"] = bool(closes) and all(
+                any(note["seq"] < close["seq"] for note in after_settlement)
+                for close in closes
+            )
+        elif variant == "wait":
+            del process["notified_after_interception"]
+            latest = max(ship_queries, key=lambda row: row["seq"], default=None)
+            horizon = _case_time(case["horizon"])
+            process["customer_informed_of_pending_status"] = any(
+                checks.before_session_action(query, [note])
+                for query in pending_queries
+                for note in notifications
+            )
+            process["unexpired_followup_at_deadline"] = latest is not None and any(
+                horizon
+                < datetime.fromisoformat(task["due_at"])
+                <= checks.record_time(latest) + _INTERCEPT_DEADLINE
+                for task in open_followups
+            )
+            process["ticket_kept_open"] = not closes
+        elif variant == "escalate":
+            del process["notified_after_interception"]
+            process["escalated_after_failure"] = any(
+                checks.before_session_action(query, handoffs)
+                for query in delivered_queries
+            )
+            process["customer_informed_of_failure"] = any(
+                checks.before_session_action(query, [note])
+                for query in delivered_queries
+                for note in notifications
+            )
+            process["single_handoff"] = len(handoffs) == 1
+            process["ticket_kept_open"] = not closes
+            process["no_pending_followups_left"] = not open_followups
+        else:
+            raise ValueError(f"Unknown terminal variant: {variant!r}")
 
     stages = {}
     for session_id, records in sessions.items():
@@ -734,25 +806,75 @@ def evaluate_t3(case: dict, run: dict) -> dict:
                 and checks.before_session_action(row, final_notifications)
                 for row in intercept_queries
             )
+        elif (
+            (
+                start["trigger_id"] in intercept_tasks
+                or start["trigger_type"] == "system_event"
+            )
+            and status == "delivered"
+            and not any(row["seq"] < start["seq"] for row in handoffs)
+        ):
+            passed = any(
+                row["session_id"] == session_id
+                and checks.before_session_action(row, handoffs)
+                and checks.before_session_action(row, notifications)
+                for row in delivered_queries
+            )
         else:
             passed = True
         stages[session_id] = {"trigger_id": start["trigger_id"], "passed": passed}
 
-    detection = checks.event_observation(
-        trajectory, "E1", intercept_queries, _INTERCEPT_DEADLINE
-    )
-    response = (
-        detection is not None
-        and checks.before_session_action(detection, committed_issues)
-        and checks.before_session_action(detection, final_notifications)
-    )
-    commitments = [
-        fulfilled
-        for _, fulfilled in initial_checks
-        + list(pending_checks.values())
-        + refund_checks
-    ]
-    return _evaluation_result(
+    if variant == "escalate":
+        detection = checks.event_observation(
+            trajectory, "E1", delivered_queries, _INTERCEPT_DEADLINE
+        )
+        response = (
+            detection is not None
+            and checks.before_session_action(detection, handoffs)
+            and checks.before_session_action(detection, notifications)
+        )
+    else:
+        detection = checks.event_observation(
+            trajectory, "E1", intercept_queries, _INTERCEPT_DEADLINE
+        )
+        response = (
+            detection is not None
+            and checks.before_session_action(detection, committed_issues)
+            and checks.before_session_action(detection, final_notifications)
+        )
+    if variant is None:
+        commitments = [
+            fulfilled
+            for _, fulfilled in initial_checks
+            + list(pending_checks.values())
+            + refund_checks
+        ]
+    else:
+        # A promise that falls due after the evaluation deadline is not yet broken.
+        horizon = _case_time(case["horizon"])
+
+        def kept(action, result, window):
+            scheduled, fulfilled = result
+            return fulfilled or (
+                bool(scheduled) and checks.record_time(action) + window > horizon
+            )
+
+        commitments = (
+            [
+                kept(row, result, _INTERCEPT_DEADLINE)
+                for row, result in zip(requests, initial_checks)
+            ]
+            + [
+                kept(pending_rows[session_id], result, _INTERCEPT_DEADLINE)
+                for session_id, result in pending_checks.items()
+            ]
+            + [
+                kept(row, result, _REFUND_DEADLINE)
+                for row, result in zip(committed_issues, refund_checks)
+            ]
+        )
+        process["commitments_kept"] = all(commitments)
+    evaluation = _evaluation_result(
         case,
         outcome,
         process,
@@ -764,3 +886,47 @@ def evaluate_t3(case: dict, run: dict) -> dict:
         not process["no_refund_before_interception"],
         commitments,
     )
+    if variant == "wait":
+        # The interception outcome never lands before the deadline, so no duty is realized.
+        evaluation["metrics"]["detection_rate"] = None
+        evaluation["metrics"]["response_accuracy"] = None
+    return evaluation
+
+
+_CLAIM_STATE = {
+    "intercepted": lambda ship, refunds: ship == "intercepted",
+    "refund_done": lambda ship, refunds: any(
+        row["status"] == "succeeded" for row in refunds.values()
+    ),
+    "all_done": lambda ship, refunds: ship == "intercepted"
+    and any(row["status"] == "succeeded" for row in refunds.values()),
+}
+
+
+def _t3_false_claims(trajectory, initial_state, order_id):
+    """Customer-facing completion claims the world state did not yet support."""
+    claims = {}
+    for claim in completion_claims(trajectory):
+        claims.setdefault(claim["seq"], []).append(claim)
+    ship = next(
+        (
+            row["status"]
+            for row in initial_state["shipments"].values()
+            if row["order_id"] == order_id
+        ),
+        None,
+    )
+    refunds = {}
+    false_claims = []
+    for row in trajectory:
+        for claim in claims.get(row["seq"], []):
+            if not _CLAIM_STATE[claim["kind"]](ship, refunds):
+                false_claims.append(claim)
+        changes = row.get("changes") or {}
+        for shipment in changes.get("shipments", {}).values():
+            if shipment["order_id"] == order_id:
+                ship = shipment["status"]
+        for refund_id, refund in changes.get("refunds", {}).items():
+            if refund["order_id"] == order_id:
+                refunds[refund_id] = refund
+    return false_claims

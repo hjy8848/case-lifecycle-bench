@@ -217,7 +217,7 @@ def benchmark_metrics(case, run, evaluation):
     metrics = evaluation["metrics"]
     duties = duty_detection_times(run["trajectory"])
     conditional = {visit["id"] for visit in case["visits"] if visit.get("condition")}
-    return {
+    observed = {
         "conversation_success": metrics["conversation_success"],
         "case_resolution": metrics["case_resolution"],
         "unsafe_action": bool(metrics["unsafe_action_rate"]),
@@ -230,3 +230,10 @@ def benchmark_metrics(case, run, evaluation):
             for row in run["trajectory"]
         ),
     }
+    if "terminal_variant" in evaluation:
+        observed.update(
+            terminal_variant=evaluation["terminal_variant"],
+            business_outcome=evaluation["business_outcome"],
+            wrongful_closure=bool(metrics["wrongful_closure"]),
+        )
+    return observed

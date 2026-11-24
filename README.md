@@ -105,6 +105,18 @@ python -m case_lifecycle_bench.ledger_panel --output runs/task-ledger-panel --mo
 
 有多个推理副本时，可用 `--api-bases` 传入地址。每个用例的三个设置保留在同一副本运行。单独跑一个用例时可选 `--memory task-ledger`。
 
+## 三个结果与终态变体
+
+未结案不等于失败。带 `terminal_variant` 的用例把评分拆成三个结果：对话成功由客户决定，`case_resolution` 表示责任履行，业务结果另存为 `business_outcome`，只用于分组。责任履行要求 Agent 的终态与同一实例下 Oracle 的终态一致、全部过程检查通过、没有不安全操作。`wrongful_closure` 标记业务没有解决、Agent 却关了单或告诉客户已经办好。没有 `terminal_variant` 的用例保持原来的业务结果判据，等对应模板返工后再切换。
+
+三种变体由同一粒种子产生，只差关键事件的时间。已解决：结果在截止前生效，Agent 核实、通知、关单。继续等：仍在处理且没超时限，Agent 保持工单打开、按时复查、如实告知并排好下一次跟进。该升级：计划失败或超过时限，Agent 转人工并告知客户。连续 10 个种子按 5／3／2 分配。T3 是第一个例子，继续等对应承运商结果在截止之后才出现。
+
+```powershell
+python -m case_lifecycle_bench.variant_check --seed 300
+```
+
+验收脚本检查 Oracle 在两种唤醒下对每个实例都履行责任，什么都不做、提前结案和拦截前退款的反例在所有实例上都不能通过，并按变体分别报告责任履行率和错误结案率。
+
 ## 复现九用例记忆对照
 
 先设置实验网关的进程环境，再从上述 Pilot 固定选取 T1、T2、T9 各三个用例。在 Poll-only 下，每个用例运行三种记忆设置。保留同一个输出目录再次运行时，批次会跳过已保存的轨迹。
