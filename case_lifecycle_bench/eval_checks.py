@@ -151,11 +151,9 @@ DUTY_READS = {
     "shipments": {"get_shipment": ("shipment_id", "status")},
     "quotes": {"read_renewal_quote": ("policy_id", "status", "version")},
     "work_items": {
-        **{
-            name: ("subject_id", "status")
-            for name in ("read_application", "read_repair_order")
-        },
+        "read_application": ("subject_id", "status"),
         "read_installment": ("subject_id", "status", "broken_promises"),
+        "read_repair_order": ("subject_id", "status", "sla_exceeded", "reorder_count"),
     },
 }
 

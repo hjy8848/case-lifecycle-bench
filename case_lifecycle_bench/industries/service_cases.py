@@ -4,6 +4,7 @@ from functools import partial
 
 from .service import Milestone, Workflow, run_oracle
 from .servicing.credit_delinquency import DELINQUENCY
+from .servicing.repair_parts import REPAIR
 
 APPLICATION = Workflow(
     "credit",
@@ -28,25 +29,6 @@ APPLICATION = Workflow(
         ),
     ),
     "我的材料已经补交了，想知道申请办到哪一步了。",
-)
-REPAIR = Workflow(
-    "field_service",
-    "repair_waiting_for_parts",
-    "维修预约与配件确认",
-    "read_repair_order",
-    (
-        Milestone(
-            "part_available",
-            "reserve_required_part",
-            "Reserve the verified part for this repair order. Do not promise an appointment yet.",
-        ),
-        Milestone(
-            "technician_available",
-            "book_and_notify_repair",
-            "Book the confirmed technician slot against the reserved part and send the simulated appointment confirmation. Then close the ticket.",
-        ),
-    ),
-    "维修配件到了吗？上门时间确定了吗？",
 )
 
 WORKFLOWS = {

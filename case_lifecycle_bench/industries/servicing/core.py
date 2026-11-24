@@ -123,6 +123,9 @@ class ServicingEnvironment(LifecycleEnvironment):
     def _visit_condition(self, condition) -> bool:
         if condition is None:
             return True
+        if condition.get("no_message_yet"):
+            # The customer has heard nothing from the agent by the time they come back.
+            return not self.state["outbox"]
         if "no_message_after_event" in condition:
             # True unless the customer was messaged after the event took effect.
             applied = next(
@@ -266,7 +269,7 @@ class ServicingEnvironment(LifecycleEnvironment):
             return {"error": "contact_not_allowed"}, {}
         if self._contact_block(channel):
             return {"error": "contact_blocked"}, {}
-        if not (
+        if "start_local" in policy and not (
             time.fromisoformat(policy["start_local"])
             <= self.t.time()
             < time.fromisoformat(policy["end_local_exclusive"])
