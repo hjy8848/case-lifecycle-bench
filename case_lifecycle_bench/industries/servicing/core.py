@@ -82,6 +82,47 @@ def conversation_success(chats, run):
     return ((chat_rate or 0) * chat_count + sum(calls)) / total
 
 
+class ChatContactMixin:
+    """A chat visit is a contact too, so the verify and contact tools work in it.
+
+    The visit carries the customer's script (what they will accept, what they offer).
+    Put this class before ServicingEnvironment in the bases.
+    """
+
+    def _trigger(self, priority, payload):
+        session, changes = super()._trigger(priority, payload)
+        if session is not None and session["trigger_type"] == "user_visit":
+            contact_id = self._new_id("contacts", "C")
+            self.contact_scripts[contact_id] = payload.get("script", {})
+            changes = {
+                **changes,
+                "contacts": {
+                    contact_id: {
+                        "contact_id": contact_id,
+                        "customer_id": self.user_id,
+                        "subject_id": self.subject_id,
+                        "channel": "secure_chat",
+                        "status": "answered",
+                        "started_at": _iso(self.t),
+                        "session_id": None,
+                        "identity_verified": False,
+                    }
+                },
+            }
+            session = {**session, "contact_id": contact_id}
+        return session, changes
+
+    def _run_session(self, agent, session_id, session, changes):
+        contact_id = session.get("contact_id")
+        if contact_id is not None:
+            rows = changes.get("contacts", self.state["contacts"])
+            changes = {
+                **changes,
+                "contacts": {contact_id: {**rows[contact_id], "session_id": session_id}},
+            }
+        super()._run_session(agent, session_id, session, changes)
+
+
 class ServicingEnvironment(LifecycleEnvironment):
     # What the model calls the subject in session context and tool arguments.
     SUBJECT_KEY = "subject_id"

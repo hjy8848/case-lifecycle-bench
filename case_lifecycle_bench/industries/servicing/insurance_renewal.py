@@ -19,7 +19,12 @@ from ...model_agent import TOOLS as STANDARD_TOOLS
 from ...model_agent import _tool
 from ...outcomes import OutcomeSpec, completion_claims, variant_for_seed
 from . import ServicingTemplate
-from .core import CONTACT_VIOLATIONS, ServicingEnvironment, conversation_success
+from .core import (
+    CONTACT_VIOLATIONS,
+    ChatContactMixin,
+    ServicingEnvironment,
+    conversation_success,
+)
 
 TEMPLATE = "insurance_renewal_followup"
 NO_HUMAN_REQUEST = "你不会要求转人工、主管，也不会提出投诉。"
@@ -257,7 +262,7 @@ def generate(seed: int) -> dict:
 # -- environment ---------------------------------------------------------------
 
 
-class RenewalEnvironment(ServicingEnvironment):
+class RenewalEnvironment(ChatContactMixin, ServicingEnvironment):
     SUBJECT_KEY = "policy_id"
     contact_tools = ("present_renewal_quote", "record_quote_consent", "submit_renewal")
 
@@ -300,40 +305,6 @@ class RenewalEnvironment(ServicingEnvironment):
         if isinstance(condition, dict) and "renewal_not_confirmed" in condition:
             return self._record()["renewal_state"] != "confirmed"
         return super()._visit_condition(condition)
-
-    # A chat visit is a contact too, so the verify, quote and consent tools work in it.
-    def _trigger(self, priority, payload):
-        session, changes = super()._trigger(priority, payload)
-        if session is not None and session["trigger_type"] == "user_visit":
-            contact_id = self._new_id("contacts", "C")
-            self.contact_scripts[contact_id] = payload["script"]
-            changes = {
-                **changes,
-                "contacts": {
-                    contact_id: {
-                        "contact_id": contact_id,
-                        "customer_id": self.user_id,
-                        "subject_id": self.subject_id,
-                        "channel": "secure_chat",
-                        "status": "answered",
-                        "started_at": _iso(self.t),
-                        "session_id": None,
-                        "identity_verified": False,
-                    }
-                },
-            }
-            session = {**session, "contact_id": contact_id}
-        return session, changes
-
-    def _run_session(self, agent, session_id, session, changes):
-        contact_id = session.get("contact_id")
-        if contact_id is not None:
-            rows = changes.get("contacts", self.state["contacts"])
-            changes = {
-                **changes,
-                "contacts": {contact_id: {**rows[contact_id], "session_id": session_id}},
-            }
-        super()._run_session(agent, session_id, session, changes)
 
     def _domain_execute(self, tool, args, session_id):
         if tool in {"read_policy", "read_renewal_quote"}:
