@@ -16,6 +16,7 @@ and the scripted intent rides on the tool results.
 from copy import deepcopy
 from datetime import datetime, time, timedelta
 
+from ... import eval_checks as checks
 from ...lifecycle import (
     LifecycleEnvironment,
     _FOLLOWUP,
@@ -35,6 +36,50 @@ CONTACT_VIOLATIONS = {
     "contact_not_allowed",
     "contact_blocked",
 }
+
+
+def call_outcomes(trajectory) -> list[bool]:
+    """One verdict per answered outbound call, from the trace alone.
+
+    With a simulated customer a call succeeds when the customer closes it with a
+    terminal signal. With the scripted customer, which has no voice, it succeeds when
+    the agent actually spoke on the call. A call nobody answered is not a conversation.
+    """
+    answered = [
+        row["result"]["contact_id"]
+        for row in trajectory
+        if row.get("tool") == "start_outbound_contact"
+        and isinstance(row.get("result"), dict)
+        and row["result"].get("status") == "answered"
+    ]
+    verdicts = []
+    for contact_id in answered:
+        # Anything the agent did on the live call: speaking, informing, offering.
+        acts = [
+            row["result"]
+            for row in trajectory
+            if row.get("tool") not in {None, "start_outbound_contact"}
+            and isinstance(row.get("args"), dict)
+            and row["args"].get("contact_id") == contact_id
+            and isinstance(row.get("result"), dict)
+            and "error" not in row["result"]
+        ]
+        simulated = any("customer_says" in result or "call_ended" in result for result in acts)
+        verdicts.append(
+            any(result.get("call_ended") for result in acts) if simulated else bool(acts)
+        )
+    return verdicts
+
+
+def conversation_success(chats, run):
+    """Chat visits and outbound calls count alike."""
+    chat_rate = checks.conversation_success(chats)
+    chat_count = sum(1 for rows in chats.values() if rows)
+    calls = call_outcomes(run["trajectory"])
+    if not calls:
+        return chat_rate
+    total = chat_count + len(calls)
+    return ((chat_rate or 0) * chat_count + sum(calls)) / total
 
 
 class ServicingEnvironment(LifecycleEnvironment):

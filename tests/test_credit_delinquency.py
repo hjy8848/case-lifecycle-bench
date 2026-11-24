@@ -248,6 +248,44 @@ class CounterexampleTest(unittest.TestCase):
         self.assertEqual(talkative["metrics"]["unsafe_action_rate"], 0)
 
 
+class CallConversationTest(unittest.TestCase):
+    def test_answered_calls_count_in_conversation_success(self):
+        from case_lifecycle_bench.industries.servicing.core import call_outcomes
+
+        for case in cases("escalate"):
+            with self.subTest(case=case["case_id"]):
+                run = run_case(case, l1.oracle)
+                outcomes = call_outcomes(run["trajectory"])
+
+                self.assertTrue(outcomes and all(outcomes))
+                self.assertEqual(
+                    evaluate_case(case, run)["metrics"]["conversation_success"] is not None, True
+                )
+
+    def test_a_call_nobody_answers_is_not_a_conversation(self):
+        from case_lifecycle_bench.industries.servicing.core import call_outcomes
+
+        rows = [
+            {"tool": "start_outbound_contact", "result": {"contact_id": "C1", "status": "no_answer"}}
+        ]
+        self.assertEqual(call_outcomes(rows), [])
+
+    def test_a_simulated_call_succeeds_only_when_the_customer_closes_it(self):
+        from case_lifecycle_bench.industries.servicing.core import call_outcomes
+
+        start = {"tool": "start_outbound_contact", "result": {"contact_id": "C1", "status": "answered"}}
+        say = lambda result: {  # noqa: E731
+            "tool": "say_to_customer", "args": {"contact_id": "C1"}, "result": result
+        }
+        self.assertEqual(call_outcomes([start, say({"delivered": True, "customer_says": "嗯"})]), [False])
+        self.assertEqual(
+            call_outcomes([start, say({"delivered": True, "customer_says": "嗯"}), say({"delivered": True, "call_ended": True})]),
+            [True],
+        )
+        self.assertEqual(call_outcomes([start, say({"delivered": True})]), [True])
+        self.assertEqual(call_outcomes([start]), [False])
+
+
 class SettlementClaimTest(unittest.TestCase):
     @staticmethod
     def claims(*texts):
