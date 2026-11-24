@@ -129,6 +129,27 @@ python -m case_lifecycle_bench.template_run --template field-service-repair `
 
 每个实例存一份带轨迹的 JSON，已存在的结果会复用，结尾按变体汇总责任履行率、不安全次数和错误结案。脚本用完后客户按实例的默认设定继续接听，一次浪费的外呼不会让用例无解。承诺日期的写法不限，按时刻比较。
 
+### 在服务器上部署和批跑
+
+NPU 机器上的 vLLM 副本只监听 127.0.0.1，所以直接把项目放到那台机器上跑，请求走本机，不用 SSH 转发，转发掉线也就不会丢任务。项目只依赖标准库，用机器上已有的 Python 3.12 即可。
+
+```powershell
+# 本机：按提交打包，传到服务器上的新目录
+git archive --format=tar --prefix=CaseLifecycleBench-<提交>/ -o clb.tar HEAD
+scp clb.tar npu30001:/home/<用户>/projects/ ; ssh npu30001 'cd projects && tar -xf clb.tar && rm clb.tar'
+```
+
+```bash
+# 服务器：测试、启动、查看
+cd ~/projects/CaseLifecycleBench-<提交>
+PYTHON=/path/to/python3.12 bash -c '$PYTHON -m unittest discover -s tests'
+PYTHON=/path/to/python3.12 WORKERS=1 SEEDS=10 bash deploy/start_in_tmux.sh
+tail -f runs/server-*/progress.log
+python -m case_lifecycle_bench.template_summary runs/server-*/l1-llm
+```
+
+`deploy/run_templates.sh` 同时跑五个任务：两个外呼模板各用脚本客户和 LLM 客户跑一次，贷款模板跑一次。每个任务对输出目录做第二遍，只补跑失败的。`WORKERS` 是每个任务在每个副本上同时跑的实例数，五个任务叠加后每个副本同时有五倍的请求。`template_summary` 用当前评分器从轨迹重算汇总，所以评分修正会作用到旧结果。
+
 ## 复现九用例记忆对照
 
 先设置实验网关的进程环境，再从上述 Pilot 固定选取 T1、T2、T9 各三个用例。在 Poll-only 下，每个用例运行三种记忆设置。保留同一个输出目录再次运行时，批次会跳过已保存的轨迹。
