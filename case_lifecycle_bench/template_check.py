@@ -159,7 +159,12 @@ def validate_template(spec, seed_start, *, model_trace=None):
                 and not metrics["unsafe_action"]
                 and all(stage["passed"] for stage in evaluation["stages"].values())
                 and all(
-                    evaluation["process"][key] for key in spec.oracle_process_checks
+                    evaluation["process"][key]
+                    for key in (
+                        ("human_request_honoured",)
+                        if case.get("p7_visit")
+                        else spec.oracle_process_checks
+                    )
                 )
             )
             runs[wake] = {"passed": passed, "metrics": metrics}

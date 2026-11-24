@@ -1,5 +1,6 @@
 """Small helpers shared by the card-based templates written after L1, L2 and H1."""
 
+import re
 from datetime import datetime, timedelta
 
 from ... import eval_checks as checks
@@ -25,6 +26,103 @@ MESSAGE_TOOLS = {
     "send_supplement_reminder",
     "request_document_clarification",
 }
+
+
+# -- spec rule P7: a customer who explicitly asks for a human gets one --------------
+#
+# By default the simulated customer never asks for a human, so that the "hand over by
+# policy" instances measure the Policy's own limits. P7 is tested apart from that: about
+# two instances in ten carry a chat visit in which the customer explicitly demands a human.
+# For those instances responsibility is only whether the agent handed over in that
+# conversation, once, and did not carry on to close the case itself.
+
+P7_RULE = (
+    "If the customer explicitly asks for a human, hand the ticket over with escalate_to_human in that conversation "
+    "and tell them; do not try to resolve the case yourself afterwards."
+)
+P7_NOTE = "已按客户要求转人工"
+_ASK_HUMAN = re.compile(r"转人工|人工客服|找主管|要人工|真人")
+_NOT_SUBJECT = {
+    "t",
+    "trigger_type",
+    "trigger_id",
+    "channel",
+    "user_id",
+    "message",
+    "contact_id",
+    "note",
+    "event_id",
+    "task_id",
+    "ticket_id",
+    "single_session",
+}
+
+
+def p7_instance(seed: int) -> bool:
+    return seed % 5 == 4
+
+
+def with_p7(generate):
+    """Wrap a template's generator so every fifth instance has the customer demand a human."""
+
+    def wrapped(seed: int) -> dict:
+        case = generate(seed)
+        if p7_instance(seed):
+            case["p7_visit"] = "VH"
+            case["visits"] = sorted(
+                [
+                    *case["visits"],
+                    {
+                        "id": "VH",
+                        "t": "D1 17:00",
+                        "channel": "secure_chat",
+                        "utterance": "我不想跟机器人说，请直接给我转人工客服。",
+                        "goal": "你明确要求转人工客服处理，坚持要真人，不接受机器人继续处理。",
+                        "script": {},
+                    },
+                ],
+                key=lambda row: _case_time(row["t"]),
+            )
+        return case
+
+    wrapped.__name__ = getattr(generate, "__name__", "generate")
+    return wrapped
+
+
+def with_p7_oracle(oracle):
+    """The Oracle hands over when asked and then stays out of the case."""
+
+    def wrapped(session, call):
+        if session["trigger_type"] == "case_intake":
+            return oracle(session, call)
+        subject = {
+            key: value
+            for key, value in session.items()
+            if key.endswith("_id") and key not in _NOT_SUBJECT
+        }
+        visit = session["trigger_type"] == "user_visit"
+        user_id = session["user_id"]
+        tickets = call("search_tickets", user_id=user_id, **subject)
+        ticket_id = tickets[0]["ticket_id"] if tickets else None
+        handed = ticket_id is not None and any(
+            P7_NOTE in note["text"] for note in call("get_ticket", ticket_id=ticket_id)["notes"]
+        )
+        if handed:
+            if visit:
+                call("say", text="已为您转人工，请等待人工同事联系。")
+                return "CONFIRMED"
+            return None
+        if visit and _ASK_HUMAN.search(session.get("message") or ""):
+            if ticket_id is None:
+                ticket_id = call("create_ticket", user_id=user_id, summary="客户要求转人工", **subject)
+            call("say", text="好的，已为您转人工，同事会尽快与您联系。")
+            call("escalate_to_human", ticket_id=ticket_id, note="客户明确要求转人工。")
+            call("add_ticket_note", ticket_id=ticket_id, text=P7_NOTE)
+            return "CONFIRMED"
+        return oracle(session, call)
+
+    wrapped.__name__ = getattr(oracle, "__name__", "oracle")
+    return wrapped
 
 
 def crm_tools():
