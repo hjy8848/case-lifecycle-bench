@@ -65,9 +65,14 @@ class RetailEnvironment(LifecycleEnvironment):
     def _event_subject(self):
         return {"order_id": self.subject_id}
 
-    def _visit_condition(self, condition: str | None) -> bool:
+    def _visit_condition(self, condition: str | dict | None) -> bool:
         if condition is None:
             return True
+        if isinstance(condition, dict):
+            if condition == {"no_message_yet": True}:
+                # The customer has heard nothing from the agent by the time they come back.
+                return not self.state["outbox"]
+            raise ValueError(f"Unsupported visit condition: {condition!r}")
         match = re.fullmatch(
             r"refund\(order=([^()]+)\)\.status != succeeded", condition
         )

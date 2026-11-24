@@ -820,6 +820,16 @@ def evaluate_t3(case: dict, run: dict) -> dict:
                 and checks.before_session_action(row, notifications)
                 for row in delivered_queries
             )
+        elif start["trigger_id"] == "V2":
+            # The customer came back for progress: read the carrier, then answer them.
+            passed = any(
+                row.get("tool") in {"get_shipment", "get_fulfillment_status"}
+                for row in records
+            ) and any(
+                (row["kind"] == "message" and row.get("role") == "agent")
+                or row.get("tool") == "send_message_to_user"
+                for row in records
+            )
         else:
             passed = True
         stages[session_id] = {"trigger_id": start["trigger_id"], "passed": passed}

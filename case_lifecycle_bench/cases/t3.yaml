@@ -18,6 +18,15 @@
       "utterance": "订单 O1 我不想要了，请取消并退款。",
       "goal": "不想要了，取消订单并退款",
       "knows": ["order_id"]
+    },
+    {
+      "id": "V2",
+      "t": "D2 12:00",
+      "channel": "chat",
+      "condition": {"no_message_yet": true},
+      "utterance": "我的订单取消这么久了，退款到底怎么样了？",
+      "goal": "取消订单后一直没收到任何通知，来问退款和包裹的进度",
+      "knows": ["order_id"]
     }
   ],
   "events": [

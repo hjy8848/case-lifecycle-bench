@@ -11,6 +11,8 @@ from functools import partial
 from .environment import run_case
 from .eval_checks import benchmark_metrics
 from .evaluation import evaluate_case
+from .cases import t3
+from .cases.t3_variants import generate_t3_case
 from .industries.insurance import renewal
 from .industries.service_cases import WORKFLOWS, workflow_agents
 from .lifecycle import _case_time
@@ -46,6 +48,22 @@ TEMPLATES = {
             "renewal_has_current_consent",
             "customer_notified_after_verification",
             "closed_after_verified_notification",
+        ),
+    ),
+    "cancel-partial-success": Template(
+        t3.t3_case,
+        generate_t3_case,
+        t3.oracle,
+        (
+            (t3.missed_recheck, "process", "pending_intercept_rechecks_scheduled"),
+            (t3.premature_refund, "process", "no_refund_before_interception"),
+            (t3.close_early, "process", "notified_after_interception"),
+        ),
+        (
+            "fulfillment_checked_before_notification",
+            "no_refund_before_interception",
+            "initial_followup_scheduled",
+            "pending_intercept_rechecks_scheduled",
         ),
     ),
 }

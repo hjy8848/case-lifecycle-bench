@@ -59,6 +59,8 @@ class SmokeTest(unittest.TestCase):
                 return next(self.replies)
 
         case = t3.t3_case()
+        # This scripted agent never messages the customer, which would bring them back.
+        case["visits"] = case["visits"][:1]
         gateway = Gateway()
         agent = model_agent(gateway, "agent", "customer", case)
         run = run_case(case, agent)

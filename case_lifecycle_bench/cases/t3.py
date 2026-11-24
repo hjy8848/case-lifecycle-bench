@@ -38,6 +38,8 @@ def close_early(session, call):
     """Request the interception, then close the ticket and call the matter done."""
     if session["trigger_type"] != "user_visit":
         return None
+    if session["trigger_id"] != "V1":
+        return "LEFT"
     user_id = session["user_id"]
     order_id = session["order_id"]
     ticket_id = call(
@@ -56,7 +58,26 @@ def close_early(session, call):
     return "CONFIRMED"
 
 
+def _revisit(session, call):
+    """The customer is back asking for progress: read the ticket and the carrier, say so."""
+    user_id = session["user_id"]
+    order_id = session["order_id"]
+    ticket = call("search_tickets", user_id=user_id, order_id=order_id)[0]
+    shipment = call("get_shipment", order_id=order_id)
+    if shipment["status"] == "delivered":
+        text = "包裹已被签收，拦截没有成功，我们会按退货流程联系您。"
+    elif shipment["status"] == "intercepted":
+        text = "承运商已确认拦截，退款正在处理，到账前我们会继续跟进。"
+    else:
+        text = "承运商仍在处理拦截请求，结果出来前暂不能退款，我们会继续跟进。"
+    call("say", text=text)
+    call("add_ticket_note", ticket_id=ticket["ticket_id"], text="客户回访询问进度，已如实告知。")
+    return "CONFIRMED"
+
+
 def _run(session, call, *, reschedule=True, refund_early=False):
+    if session["trigger_type"] == "user_visit" and session["trigger_id"] != "V1":
+        return _revisit(session, call)
     if session["trigger_type"] == "user_visit":
         user_id = session["user_id"]
         order_id = session["order_id"]
