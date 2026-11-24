@@ -99,6 +99,8 @@ def _spec(template: str) -> OutcomeSpec:
 
 
 _CLAUSE_SPLIT = re.compile(r"[。！？；，,;!?\n]")
+# Words in quotation marks repeat someone else's, usually the customer's question.
+_QUOTED = re.compile(r"“[^”]*”|\"[^\"]*\"|「[^」]*」|『[^』]*』")
 # A clause that promises, hedges or negates is not a claim that the matter is done.
 _HEDGE = re.compile(r"如果|若|一旦|将|会|待|预计|尚未|未|没有|等")
 _CLAIMS = {
@@ -134,7 +136,7 @@ def completion_claims(trajectory, patterns=None) -> list[dict]:
             text = row["args"]["text"]
         else:
             continue
-        for clause in _CLAUSE_SPLIT.split(text):
+        for clause in _CLAUSE_SPLIT.split(_QUOTED.sub("", text)):
             for kind, (pattern, hedge) in compiled.items():
                 if pattern.search(clause) and not hedge.search(clause):
                     found.append({"seq": row["seq"], "kind": kind, "sentence": clause})
