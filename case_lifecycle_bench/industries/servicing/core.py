@@ -202,6 +202,21 @@ class ServicingEnvironment(LifecycleEnvironment):
         if condition.get("no_message_yet"):
             # The customer has heard nothing from the agent by the time they come back.
             return not self.state["outbox"]
+        if "no_message_after_applied_event" in condition:
+            # Unlike no_message_after_event, an event that never took effect brings nobody back.
+            applied = next(
+                (
+                    row
+                    for row in self.trace
+                    if row["kind"] == "world_event"
+                    and row["event_id"] == condition["no_message_after_applied_event"]
+                    and row["changes"]
+                ),
+                None,
+            )
+            if applied is None:
+                return False
+            return not any(row["t"] >= applied["t"] for row in self.state["outbox"].values())
         if "no_contact_after_event" in condition:
             # Neither a message nor a call reached the customer since the event took effect.
             applied = next(

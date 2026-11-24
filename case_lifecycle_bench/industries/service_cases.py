@@ -9,6 +9,7 @@ from .servicing.loan_disbursement import DISBURSEMENT
 from .servicing.loan_documents import APPLICATION
 from .servicing.loan_quote_change import QUOTE_CHANGE
 from .servicing.repair_parts import REPAIR
+from .servicing.visit_reschedule import RESCHEDULE
 from .servicing.repair_rework import REWORK
 from .servicing.visit_noshow import NOSHOW
 
@@ -24,6 +25,7 @@ WORKFLOWS = {
     "credit-quote-change": QUOTE_CHANGE,
     "field-service-noshow": NOSHOW,
     "field-service-rework": REWORK,
+    "field-service-reschedule": RESCHEDULE,
 }
 BY_TEMPLATE = {workflow.template: workflow for workflow in WORKFLOWS.values()}
 
