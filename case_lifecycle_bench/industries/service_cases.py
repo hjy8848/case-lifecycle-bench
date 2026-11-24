@@ -3,26 +3,8 @@
 from functools import partial
 
 from .service import Milestone, Workflow, run_oracle
+from .servicing.credit_delinquency import DELINQUENCY
 
-DELINQUENCY = Workflow(
-    "credit",
-    "credit_delinquency_followup",
-    "逾期提醒与还款承诺跟进",
-    "read_installment",
-    (
-        Milestone(
-            "past_due",
-            "send_past_due_reminder",
-            "Send a simulated secure-inbox reminder. Record and schedule a check for the exact repayment commitment time if the scripted customer offers one.",
-        ),
-        Milestone(
-            "payment_posted",
-            "send_settlement_notice",
-            "Confirm the payment clearing result, send the verified settlement notice, then close the ticket.",
-        ),
-    ),
-    "我想确认这期付款入账了吗？之前的提醒还需要处理吗？",
-)
 APPLICATION = Workflow(
     "credit",
     "credit_application_documents",
@@ -76,6 +58,8 @@ BY_TEMPLATE = {workflow.template: workflow for workflow in WORKFLOWS.values()}
 
 
 def workflow_agents(workflow):
+    if hasattr(workflow, "agents"):  # a card-based servicing template
+        return workflow.agents
     agents = {"oracle": partial(run_oracle, workflow)}
     for name, options in (
         ("missed-initial-review", {"skip_initial": True}),

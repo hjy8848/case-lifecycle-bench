@@ -244,7 +244,12 @@ def evaluate_case(case: dict, run: dict) -> dict:
         from .industries.service import evaluate_workflow
         from .industries.service_cases import BY_TEMPLATE
 
-        evaluation = evaluate_workflow(BY_TEMPLATE[template], case, run)
+        workflow = BY_TEMPLATE[template]
+        evaluation = (
+            workflow.evaluate(case, run)
+            if hasattr(workflow, "evaluate")
+            else evaluate_workflow(workflow, case, run)
+        )
     elif template in evaluators:
         evaluation = evaluators[template](case, run)
     else:

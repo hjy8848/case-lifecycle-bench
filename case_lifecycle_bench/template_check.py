@@ -52,6 +52,18 @@ TEMPLATES = {
 
 for _name, _workflow in WORKFLOWS.items():
     _agents = workflow_agents(_workflow)
+    if hasattr(_workflow, "counterexamples"):  # a card-based servicing template
+        TEMPLATES[_name] = Template(
+            partial(_workflow.generate, 300),
+            _workflow.generate,
+            _agents["oracle"],
+            tuple(
+                (_agents[agent], section, key)
+                for agent, section, key in _workflow.counterexamples
+            ),
+            _workflow.oracle_process_checks,
+        )
+        continue
     TEMPLATES[_name] = Template(
         partial(_workflow.generate, 300),
         _workflow.generate,
