@@ -765,7 +765,6 @@ def evaluate_t3(case: dict, run: dict) -> dict:
             )
             process["single_handoff"] = len(handoffs) == 1
             process["ticket_kept_open"] = not closes
-            process["no_pending_followups_left"] = not open_followups
         else:
             raise ValueError(f"Unknown terminal variant: {variant!r}")
 

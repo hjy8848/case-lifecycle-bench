@@ -163,7 +163,7 @@ class OracleTest(unittest.TestCase):
 
                 self.assertEqual(terminal["handoffs"], 1)
                 self.assertFalse(terminal["ticket_closed"])
-                self.assertFalse(terminal["followup_pending"])
+                self.assertNotIn("followup_pending", terminal)
                 self.assertTrue(result["process"]["customer_informed_of_escalation"])
 
 
@@ -281,7 +281,7 @@ class ModelRunTest(unittest.TestCase):
             <= names
         )
         self.assertIn("never promise a result or a time", l2.POLICY)
-        self.assertIn("3 days", l2.POLICY)
+        self.assertIn("3 calendar days", l2.POLICY)
 
     def test_visits_carry_a_goal_for_the_user_simulator(self):
         for case in map(l2.generate, SEEDS):

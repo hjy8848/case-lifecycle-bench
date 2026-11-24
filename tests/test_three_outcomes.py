@@ -122,7 +122,7 @@ class OracleVariantTest(unittest.TestCase):
                 self.assertEqual(terminal["handoffs"], 1)
                 self.assertEqual(terminal["active_refunds"], 0)
                 self.assertFalse(terminal["ticket_closed"])
-                self.assertFalse(terminal["followup_pending"])
+                self.assertNotIn("followup_pending", terminal)
 
     def test_resolution_closes_the_ticket_after_the_refund_settles(self):
         for case in instances("resolved"):

@@ -113,7 +113,7 @@ class OracleTest(unittest.TestCase):
 
                 self.assertEqual(terminal["handoffs"], 1)
                 self.assertFalse(terminal["ticket_closed"])
-                self.assertFalse(terminal["followup_pending"])
+                self.assertNotIn("followup_pending", terminal)
                 self.assertTrue(result["process"]["customer_informed_of_escalation"])
 
 
@@ -303,7 +303,7 @@ class ModelRunTest(unittest.TestCase):
             <= names
         )
         self.assertIn("Shipped is not ready", h1.POLICY)
-        self.assertIn("5 days", h1.POLICY)
+        self.assertIn("5 calendar days", h1.POLICY)
 
 
 if __name__ == "__main__":

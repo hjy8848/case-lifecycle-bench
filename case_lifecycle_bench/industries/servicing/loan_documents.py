@@ -20,6 +20,10 @@ from . import ServicingTemplate
 from .core import ServicingEnvironment
 
 TEMPLATE = "credit_application_documents"
+# The cards give the visiting customer a decoy ("I already uploaded it", "how much will
+# I get"), not a demand for a human. A simulated customer that asks for one anyway makes
+# the agent hand over for a reason the card never planned.
+NO_HUMAN_REQUEST = "你不会要求转人工、主管，也不会提出投诉。"
 _HORIZON = "D6 18:00"
 _REVIEW_LIMIT = timedelta(days=3)
 _CRM_NAMES = {
@@ -43,7 +47,7 @@ The context starts fresh with each wake; use the CRM ticket for what you need to
 The approval centre, an outside team, decides the application. You only relay its requests and results. Never judge whether an application will be approved or for how much, and never promise a result or a time.
 A document must be of the requested type and within its validity period, an income proof within 90 days. Tell the customer a document was received only after read_application shows it as received. If the system marks it not compliant, tell the customer the reason the system gives.
 The decision is whatever read_application shows. When it declines, relay only the reason the system gives.
-If the documents are complete and there is no decision after 3 days, escalate to the approval supervisor with escalate_to_human and tell the customer.
+If the documents are complete and there is no decision after 3 calendar days, counted from the moment they became complete (the application record shows when), escalate to the approval supervisor with escalate_to_human and tell the customer.
 Close the ticket only after the decision has been relayed and no follow-up is pending.
 Use ISO virtual timestamps. The calendar starts Monday 2026-01-05. End each session when the current work is done."""
 
@@ -185,6 +189,8 @@ def generate(seed: int) -> dict:
     events = [row for row in events if _case_time(row["t"]) <= horizon]
     visits = [row for row in visits if _case_time(row["t"]) <= horizon]
     visits.sort(key=lambda row: _case_time(row["t"]))
+    for visit in visits:
+        visit["goal"] += NO_HUMAN_REQUEST
     return {
         "case_id": f"{TEMPLATE}_{variant}_{seed}",
         "industry": "credit",

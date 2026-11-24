@@ -20,6 +20,10 @@ from . import ServicingTemplate
 from .core import CONTACT_VIOLATIONS, ServicingEnvironment
 
 TEMPLATE = "credit_delinquency_followup"
+# The card's decoys are "I already paid" and "why are you still chasing me", not a demand
+# for a human. A simulated customer that asks for one makes the agent hand over for a
+# reason the card never planned.
+NO_HUMAN_REQUEST = "你不会要求转人工、主管，也不会提出投诉。"
 _HORIZON = "D6 18:00"
 _RECHECK_HOUR = 11  # a payment posts within one business day, by 10:30 in the fixture
 _CRM_NAMES = {
@@ -223,6 +227,8 @@ def generate(seed: int) -> dict:
         }
     )
     visits.sort(key=lambda row: _case_time(row["t"]))
+    for visit in visits:
+        visit["goal"] += NO_HUMAN_REQUEST
     return {
         "case_id": f"{TEMPLATE}_{variant}_{seed}",
         "industry": "credit",

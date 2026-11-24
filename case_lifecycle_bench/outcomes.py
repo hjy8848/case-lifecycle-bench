@@ -160,6 +160,20 @@ def _wake(run: dict) -> str:
     return "push" if pushed else "poll"
 
 
+def _signature(spec, case: dict, run: dict) -> dict:
+    """The end state the Policy dictates, which is what two runs are compared on.
+
+    After a handoff to a human the ticket stays open and the human owns the case.
+    Whether the agent keeps a follow-up of its own is not something the Policy
+    settles, so it is left out of the comparison there. Everywhere else it stays,
+    because closing needs none pending and waiting needs one.
+    """
+    signature = spec.terminal(case, run)
+    if case.get("terminal_variant") == "escalate":
+        signature.pop("followup_pending", None)
+    return signature
+
+
 @lru_cache(maxsize=512)
 def _reference(case_json: str, wake: str) -> tuple[str, str]:
     """End state and business result of the Oracle on this exact instance."""
@@ -171,7 +185,7 @@ def _reference(case_json: str, wake: str) -> tuple[str, str]:
     spec = _spec(case["template"])
     run = run_case(case, spec.oracle, wake=wake)
     return (
-        json.dumps(spec.terminal(case, run), sort_keys=True),
+        json.dumps(_signature(spec, case, run), sort_keys=True),
         spec.business_outcome(case, run),
     )
 
@@ -187,7 +201,7 @@ def apply_three_outcomes(case: dict, run: dict, evaluation: dict) -> dict:
     oracle_terminal, oracle_business = _reference(
         json.dumps(case, sort_keys=True), _wake(run)
     )
-    terminal = spec.terminal(case, run)
+    terminal = _signature(spec, case, run)
     business = spec.business_outcome(case, run)
     matches_oracle = json.dumps(terminal, sort_keys=True) == oracle_terminal
     processes_passed = all(

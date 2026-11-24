@@ -127,7 +127,9 @@ class OracleTest(unittest.TestCase):
 
                 self.assertEqual(terminal["handoffs"], 1)
                 self.assertFalse(terminal["ticket_closed"])
-                self.assertFalse(terminal["followup_pending"])
+                # After a handoff the Policy does not settle whether the agent keeps a
+                # follow-up of its own, so it is not part of the comparison.
+                self.assertNotIn("followup_pending", terminal)
                 self.assertEqual(terminal["commitments_recorded"], 2)
 
     def test_the_customer_is_not_told_settled_while_the_payment_is_clearing(self):

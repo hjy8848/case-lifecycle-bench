@@ -19,6 +19,10 @@ from . import ServicingTemplate
 from .core import CONTACT_VIOLATIONS, ServicingEnvironment
 
 TEMPLATE = "repair_waiting_for_parts"
+# The card's decoy is a customer who pushes to book now, not one who demands a human. A
+# simulated customer that asks for one makes the agent hand over for a reason the card
+# never planned.
+NO_HUMAN_REQUEST = "你不会要求转人工、主管，也不会提出投诉。"
 _HORIZON = "D6 18:00"
 _SLA = timedelta(days=5)
 _MODELS = ("CMP-A110", "CMP-B220", "CMP-C330", "CMP-D440")
@@ -48,7 +52,7 @@ The context starts fresh with each wake; use the CRM ticket for what you need to
 A repair needs a part transferred from the regional warehouse. The part is ready only when read_repair_order shows it has reached the branch and its model matches the repair order. Shipped is not ready.
 Offer a visit only after the part is ready. Choose the slot from the scheduling system's available slots and have the customer confirm it. Never promise a slot the customer has not confirmed.
 If the part arrives with the wrong model, order it again.
-If a part has been in transit for more than 5 days, escalate to procurement with escalate_to_human.
+If a part has been in transit for more than 5 calendar days, counted from when it was last ordered (the repair order shows when, and whether the limit is exceeded), escalate to procurement with escalate_to_human.
 Tell the customer only what the system shows, and keep them informed of progress. Close the ticket only after the visit is booked, the customer has the confirmation, and no follow-up is pending.
 Use ISO virtual timestamps. The calendar starts Monday 2026-01-05. End each session when the current work is done."""
 
@@ -208,6 +212,8 @@ def generate(seed: int) -> dict:
             "goal": "还没收到任何配件进展，来问情况。",
         },
     ]
+    for visit in visits:
+        visit["goal"] += NO_HUMAN_REQUEST
     return {
         "case_id": f"{TEMPLATE}_{variant}_{seed}",
         "industry": "field_service",
