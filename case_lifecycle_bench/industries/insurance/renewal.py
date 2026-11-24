@@ -1,13 +1,55 @@
 """Deterministic agents for the synthetic insurance renewal case."""
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from pathlib import Path
 
+from ...environment import _case_time
 
-def renewal_case() -> dict:
+
+def renewal_case(
+    quote_ready_at: str | None = None, *, revise_after_consent=False
+) -> dict:
     path = Path(__file__).with_name("renewal_quote_followup.json")
-    return json.loads(path.read_text(encoding="utf-8"))
+    case = json.loads(path.read_text(encoding="utf-8"))
+    quote_ready_at = quote_ready_at or case["events"][0]["t"]
+    if revise_after_consent:
+        case["case_id"] += "_revision"
+        case["revision_after_consent"] = {
+            "id": "E2",
+            "from_version": "Q2",
+            "changes": {"quote": {"version": "Q3", "premium_test_credits": 110}},
+        }
+        case["oracle"]["scripted_outbound_customer"]["accepts_quote_version"] = [
+            "Q2",
+            "Q3",
+        ]
+        case["oracle"]["outreach"][1:3] = [
+            "Obtain Q2 consent. When the insurer revises the quote, re-read the quote and obtain fresh consent for Q3.",
+            "Submit Q3, verify the authoritative renewal state and deliver the confirmation.",
+        ]
+    if quote_ready_at == case["events"][0]["t"]:
+        return case
+    ready = _case_time(quote_ready_at)
+    if not _case_time("D1 10:00") < ready <= _case_time("D3 09:00"):
+        raise ValueError("Quote release must be after D1 10:00 and by D3 09:00")
+    case["case_id"] += "_" + quote_ready_at.lower().replace(" ", "_").replace(":", "")
+    case["events"][0]["t"] = quote_ready_at
+    if ready > _case_time("D2 09:00"):
+        case["deadlines"]["proactive_contact"] = "D3 10:00"
+    case["oracle"]["poll"] = [
+        "At D2 09:00, if the quote is still under review, recheck at D3 09:00."
+    ]
+    case["oracle"]["push"] = [
+        "Check the quote at E1. Contact immediately if the window is open. Otherwise retain or schedule the next opening."
+    ]
+    case["oracle"]["outreach"][0] = (
+        "Verify opt-in and the current quote before starting one voice contact within the window."
+    )
+    case["checks"]["process"][0]["evidence"][-1] = (
+        "current quote delivered by the fixture's proactive_contact deadline"
+    )
+    return case
 
 
 def oracle(session, call):
@@ -71,16 +113,13 @@ def _act(session, call, *, early=False, submit_early=False, skip_notice=False):
         )
         return None
 
-    if trigger == "system_event":
-        call(
-            "add_ticket_note",
-            ticket_id=ticket_id,
-            text="承保报价已发布，按已安排的时段复查并联系。",
-        )
-        return None
-
-    if trigger == "followup_due":
-        if quote["status"] == "ready" and policy["renewal_state"] != "confirmed":
+    if trigger in {"system_event", "followup_due"}:
+        now = datetime.fromisoformat(session["t"])
+        if policy["renewal_state"] == "confirmed":
+            return None
+        if quote["status"] == "ready" and (
+            time(9) <= now.time() < time(18) or early and trigger == "followup_due"
+        ):
             customer_id = session["customer_id"]
             preferences = call("read_contact_preferences", customer_id=customer_id)
             if preferences["voice_contact_opt_in"]:
@@ -95,6 +134,19 @@ def _act(session, call, *, early=False, submit_early=False, skip_notice=False):
                         ticket_id=ticket_id,
                         text="主动联系未完成，续保仍待办理。",
                     )
+        elif trigger == "followup_due" or not any(
+            row["status"] == "pending"
+            for row in call("list_followups", ticket_id=ticket_id)
+        ):
+            due = now.replace(hour=9, minute=0)
+            if due <= now:
+                due += timedelta(days=1)
+            call(
+                "schedule_followup",
+                ticket_id=ticket_id,
+                due_at=due.isoformat(),
+                note="复查续保报价",
+            )
         return None
 
     if quote["status"] != "ready":
@@ -114,6 +166,10 @@ def _act(session, call, *, early=False, submit_early=False, skip_notice=False):
         if submit_early and trigger == "outbound_contact":
             call("submit_renewal", **contact)
         acceptance = call("present_renewal_quote", **contact)
+        if acceptance.get("quote_revised"):
+            quote = call("read_renewal_quote", policy_id=policy_id)
+            contact["quote_version"] = quote["version"]
+            acceptance = call("present_renewal_quote", **contact)
         if (
             not acceptance.get("accepted")
             or acceptance.get("quote_version") != contact["quote_version"]

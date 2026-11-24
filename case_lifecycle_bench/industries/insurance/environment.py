@@ -25,6 +25,7 @@ class InsuranceEnvironment(_Environment):
     def __init__(self, case: dict, wake: str):
         super().__init__(case, wake, single_session=False)
         self.contact_policy = case["contact_policy"]
+        self.revision_after_consent = case.get("revision_after_consent")
         self.outbound_script = case["oracle"]["scripted_outbound_customer"]
         self.contact_scripts = {}
         self._enqueue(_case_time(case["intake"]["t"]), _INTAKE, case["intake"])
@@ -137,7 +138,9 @@ class InsuranceEnvironment(_Environment):
     def _world_event(self, event, *, in_session=False):
         quote = self.state["quotes"][self.order_id]
         changes = {"quotes": {self.order_id: {**quote, **event["changes"]["quote"]}}}
-        self._record_world_event({**event, "op": "insurance.quote_update"}, changes)
+        self._record_world_event(
+            {**event, "op": "insurance.quote_update"}, changes, in_session=in_session
+        )
 
     def _execute(self, tool, args, session_id):
         reads = {
@@ -285,8 +288,9 @@ class InsuranceEnvironment(_Environment):
         contact_id = contact["contact_id"]
         customer_id = contact["customer_id"]
         customer = self.state["customers"][customer_id]
-        accepted = (
-            self.contact_scripts[contact_id]["accepts_quote_version"] == quote_version
+        accepts = self.contact_scripts[contact_id]["accepts_quote_version"]
+        accepted = quote_version in (
+            accepts if isinstance(accepts, list) else [accepts]
         )
         changes = {
             "contacts": {
@@ -389,6 +393,14 @@ class InsuranceEnvironment(_Environment):
                 else f"我暂不同意按 {revision} 续保。"
             )
             self._log("message", session_id, role="user", text=response, step=step)
+            revision_event = self.revision_after_consent
+            if (
+                result["accepted"]
+                and revision_event
+                and revision == revision_event["from_version"]
+            ):
+                self._world_event(revision_event, in_session=True)
+                result["quote_revised"] = True
         elif tool == "notify_renewal_confirmation" and result.get("ok"):
             self._log(
                 "message",

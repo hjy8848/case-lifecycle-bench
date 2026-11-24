@@ -52,10 +52,14 @@ python -m case_lifecycle_bench --case t3 --paired --agent premature-refund
 ```powershell
 python -m case_lifecycle_bench --case insurance-renewal --wake poll --trace
 python -m case_lifecycle_bench --case insurance-renewal --wake push
+python -m case_lifecycle_bench --case insurance-renewal --wake poll --quote-ready-at 'D2 14:00'
+python -m case_lifecycle_bench --case insurance-renewal --wake push --quote-ready-at 'D2 14:00' --revise-quote-after-consent
 python -m case_lifecycle_bench --case insurance-renewal --agent early-outreach
 python -m case_lifecycle_bench --case insurance-renewal --agent missing-quote-consent
 python -m case_lifecycle_bench --case insurance-renewal --agent missed-notification
 ```
+
+报价发布时间可在 D1 10:00 之后至 D3 09:00 之间调整。晚于首次复查的报价会在下一次复查时被 Poll 查到。可用 `--model` 接已有推理网关来扮演客服。客户接听、身份核验和报价同意由合成环境返回。
 
 ## 复现九用例记忆对照
 

@@ -53,6 +53,14 @@ def main():
         "--retail-order", help="Seed the case from a τ-bench v1.0.1 Retail order"
     )
     parser.add_argument(
+        "--quote-ready-at", help="Insurance quote release time, e.g. D2 14:00"
+    )
+    parser.add_argument(
+        "--revise-quote-after-consent",
+        action="store_true",
+        help="Insurance variant: the insurer revises Q2 after the customer accepts it",
+    )
+    parser.add_argument(
         "--model", help="Exact gateway model ID for a stateless model agent"
     )
     parser.add_argument(
@@ -65,6 +73,11 @@ def main():
         "--expect-case-sha256", help="Refuse to run a changed case fixture"
     )
     args = parser.parse_args()
+    insurance = args.case == "insurance-renewal"
+    if (
+        args.quote_ready_at is not None or args.revise_quote_after_consent
+    ) and not insurance:
+        parser.error("Quote options require --case insurance-renewal")
 
     if args.paired:
         if (
@@ -106,15 +119,21 @@ def main():
     if args.memory == "ledger" and args.case not in {"t1", "t2", "t9"}:
         parser.error("--memory ledger is currently supported for T1, T2 and T9")
     evaluator = evaluate_case
-    if args.case == "insurance-renewal":
-        if args.memory != "crm" or args.model or args.user_model or args.retail_order:
+    if insurance:
+        if args.memory != "crm" or args.user_model or args.retail_order:
             parser.error(
-                "insurance-renewal supports scripted agents and synthetic data"
+                "insurance-renewal uses CRM, synthetic data and a scripted customer"
             )
         from .industries.insurance import renewal
         from .industries.insurance.evaluation import evaluate_insurance
 
-        fixture = renewal.renewal_case
+        try:
+            case = renewal.renewal_case(
+                args.quote_ready_at,
+                revise_after_consent=args.revise_quote_after_consent,
+            )
+        except ValueError as error:
+            parser.error(str(error))
         agents = {
             "oracle": renewal.oracle,
             "early-outreach": renewal.early_outreach,
@@ -124,7 +143,7 @@ def main():
         evaluator = evaluate_insurance
     else:
         fixture, agents = CASES[args.case]
-    case = fixture()
+        case = fixture()
     if args.retail_order:
         try:
             case = retail_case(case, args.retail_order)
@@ -139,6 +158,7 @@ def main():
         parser.error("--user-model requires --model")
     if args.model and args.agent != "oracle":
         parser.error("--model cannot be combined with a scripted error agent")
+    user_model = None if insurance else args.user_model or args.model
     if args.model:
         key = os.environ.get("CASE_LIFECYCLE_API_KEY")
         base = os.environ.get("CASE_LIFECYCLE_API_BASE")
@@ -152,7 +172,7 @@ def main():
         if user_thinking not in (None, "true", "false"):
             parser.error("CASE_LIFECYCLE_USER_ENABLE_THINKING must be true or false")
         user_gateway = gateway
-        if user_base or user_thinking is not None:
+        if user_model and (user_base or user_thinking is not None):
             user_key = (
                 os.environ.get("CASE_LIFECYCLE_USER_API_KEY") if user_base else key
             )
@@ -163,12 +183,21 @@ def main():
                 if user_thinking is not None
                 else None,
             )
+        model_options = {}
+        if insurance:
+            from .industries.insurance import model as insurance_model
+
+            model_options = {
+                "policy": insurance_model.POLICY,
+                "tools": insurance_model.TOOLS,
+            }
         agent = model_agent(
             gateway,
             args.model,
-            args.user_model or args.model,
+            user_model,
             case,
             user_gateway=user_gateway,
+            **model_options,
         )
     else:
         if args.agent not in agents:
@@ -196,7 +225,7 @@ def main():
         result["meta"] = {
             "api_base": gateway.api_base,
             "agent_model": args.model,
-            "user_model": args.user_model or args.model,
+            "user_model": user_model,
             "memory": {
                 "crm": "stateless_crm",
                 "full-history": "full_history",

@@ -162,7 +162,6 @@ TOOLS = [
     ),
     _tool("end_session", "Finish the current session."),
 ]
-TOOL_NAMES = {item["function"]["name"] for item in TOOLS}
 SIGNALS = {"CONFIRMED", "LEFT", "UNRESOLVED"}
 _REFUND_AUTHORIZATION_REQUEST = re.compile(
     r"(?:^|[。！？!?\n])\s*(?:请(?:问)?您?(?:是否)?|您?是否)(?:确认|同意)"
@@ -254,30 +253,35 @@ def _customer_reply(gateway, model, visit, dialogue):
     return reply
 
 
-def model_agent(gateway, model, user_model, case, *, user_gateway=None):
+def model_agent(
+    gateway, model, user_model, case, *, user_gateway=None, policy=None, tools=TOOLS
+):
     visits = {row["id"]: row for row in case["visits"]}
+    tool_names = {item["function"]["name"] for item in tools}
     if user_gateway is None:
         user_gateway = gateway
 
     def agent(session, call):
         visit = (
             visits.get(session["trigger_id"])
-            if session["trigger_type"] == "user_visit"
+            if user_model and session["trigger_type"] == "user_visit"
             else None
         )
         context = {key: value for key, value in session.items() if key != "message"}
-        policy = SINGLE_SESSION_POLICY if session.get("single_session") else POLICY
+        session_policy = policy or (
+            SINGLE_SESSION_POLICY if session.get("single_session") else POLICY
+        )
         messages = [
-            {"role": "system", "content": policy},
+            {"role": "system", "content": session_policy},
             {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
         ]
         dialogue = []
-        if visit is not None:
+        if "message" in session:
             messages.append({"role": "user", "content": session["message"]})
             dialogue.append({"customer": session["message"]})
 
         for _ in range(30):
-            response = gateway.reply(model, messages, TOOLS)
+            response = gateway.reply(model, messages, tools)
             text = response.get("content") or ""
             pending = response.get("tool_calls") or []
             assistant = {"role": "assistant", "content": text or None}
@@ -294,7 +298,7 @@ def model_agent(gateway, model, user_model, case, *, user_gateway=None):
                 name = function["name"]
                 try:
                     args = json.loads(function["arguments"])
-                    if name not in TOOL_NAMES or not isinstance(args, dict):
+                    if name not in tool_names or not isinstance(args, dict):
                         raise ValueError
                     if name == "end_session":
                         return "LEFT" if visit is not None else None

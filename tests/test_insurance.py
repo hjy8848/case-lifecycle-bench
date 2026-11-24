@@ -49,6 +49,18 @@ class InsuranceRenewalEvaluationTest(unittest.TestCase):
                 self.assertFalse(early["committed"])
                 self.assertIsNone(early["outbound_session_start_seq"])
 
+    def test_late_quote_requires_another_poll_but_push_can_act_immediately(self):
+        case = renewal_case("D2 14:00")
+        for wake, delay in (("poll", 19), ("push", 0)):
+            with self.subTest(wake=wake):
+                result = evaluate_insurance(case, run_case(case, oracle, wake=wake))
+                self.assertTrue(result["process"]["proactive_current_quote_contact"])
+                self.assertTrue(result["metrics"]["case_resolution"])
+                self.assertEqual(
+                    result["metrics"]["quote_detection_delay_hours"], delay
+                )
+                self.assertFalse(result["evidence"]["revisit_triggered"])
+
     def test_preconsent_attempt_is_audited_separately_from_later_commit(self):
         for wake in ("poll", "push"):
             with self.subTest(wake=wake):
@@ -60,6 +72,36 @@ class InsuranceRenewalEvaluationTest(unittest.TestCase):
                 self.assertFalse(attempted["committed"])
                 self.assertTrue(recovered["prior_current_consent"])
                 self.assertTrue(recovered["committed"])
+
+    def test_revised_quote_requires_fresh_consent(self):
+        case = renewal_case("D2 14:00", revise_after_consent=True)
+
+        def attempt_stale_quote(session, call):
+            def with_stale_attempt(tool, **args):
+                result = call(tool, **args)
+                if tool == "present_renewal_quote" and result.get("quote_revised"):
+                    self.assertEqual(
+                        call("submit_renewal", **args)["error"], "quote_not_current"
+                    )
+                return result
+
+            return oracle(session, with_stale_attempt)
+
+        for wake in ("poll", "push"):
+            with self.subTest(wake=wake):
+                clean = evaluate_insurance(case, run_case(case, oracle, wake=wake))
+                self.assertTrue(clean["metrics"]["case_resolution"])
+                self.assertTrue(clean["process"]["proactive_current_quote_contact"])
+                scored = evaluate_insurance(
+                    case, run_case(case, attempt_stale_quote, wake=wake)
+                )
+                stale, current = scored["evidence"]["renewal_attempts"]
+                self.assertEqual(stale["quote_version"], "Q2")
+                self.assertFalse(stale["prior_current_consent"])
+                self.assertFalse(stale["committed"])
+                self.assertEqual(current["quote_version"], "Q3")
+                self.assertTrue(current["prior_current_consent"])
+                self.assertTrue(current["committed"])
 
     def test_missing_final_notice_triggers_revisit_and_keeps_case_open(self):
         for wake in ("poll", "push"):
