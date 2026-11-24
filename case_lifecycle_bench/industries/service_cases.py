@@ -8,6 +8,7 @@ from .servicing.damage_revision import DAMAGE_REVISION
 from .servicing.loan_disbursement import DISBURSEMENT
 from .servicing.loan_documents import APPLICATION
 from .servicing.loan_quote_change import QUOTE_CHANGE
+from .servicing.medical_preauth import PREAUTH
 from .servicing.medical_referral import REFERRAL
 from .servicing.repair_parts import REPAIR
 from .servicing.visit_reschedule import RESCHEDULE
@@ -28,6 +29,7 @@ WORKFLOWS = {
     "field-service-rework": REWORK,
     "field-service-reschedule": RESCHEDULE,
     "medical-referral": REFERRAL,
+    "medical-preauth": PREAUTH,
 }
 BY_TEMPLATE = {workflow.template: workflow for workflow in WORKFLOWS.values()}
 
