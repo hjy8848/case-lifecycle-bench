@@ -153,6 +153,12 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--disable-thinking", action="store_true")
     parser.add_argument(
+        "--workers-per-replica",
+        type=int,
+        default=1,
+        help="runs in flight on each replica; a vLLM replica batches many at once",
+    )
+    parser.add_argument(
         "--llm-customer",
         action="store_true",
         help="simulate outbound-call customers with the user model, not the script",
@@ -175,8 +181,12 @@ def main():
         for wake in wakes
     ]
     records, failures = [], []
-    # One worker per replica keeps each replica's runs sequential.
-    pools = [ThreadPoolExecutor(max_workers=1) for _ in args.api_bases]
+    if args.workers_per_replica < 1:
+        parser.error("--workers-per-replica must be positive")
+    # Jobs are dealt to the replicas in turn; each replica runs at most this many at once.
+    pools = [
+        ThreadPoolExecutor(max_workers=args.workers_per_replica) for _ in args.api_bases
+    ]
     try:
         futures = {}
         for index, (seed, wake) in enumerate(jobs):
