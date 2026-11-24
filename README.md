@@ -45,6 +45,16 @@ python -m case_lifecycle_bench --case t3 --paired --agent premature-refund
 
 两版使用相同的初始状态和业务结果判据。即时完成的核实计入履约，仍待办的跟进继续标为未履约。模型在单会话版收到当场核实的时间规则，多会话版保留原来的跟进期限。
 
+## T3 随机订单号对照
+
+用种子 1–30 各生成一对订单。每对共用客户号、退款金额和 T3 流程，订单号分别使用 `#W` 格式和 13 位纯数字。运行后按格式报告实际写入的拦截前退款、首次违规所在会话及 Wilson 95% 区间。先设置已有推理网关，再执行：
+
+```powershell
+python -m case_lifecycle_bench.t3_id_sweep --model qwen3.6-35b-a3b --seeds 30 --styles w7,numeric --wakes poll --output runs/t3-id-sweep --workers 4 --disable-thinking
+```
+
+四个本地转发地址可通过 `--api-bases` 一并传入。同配置重跑会跳过已有轨迹。省略 `--model` 时用 Oracle 检查流程，请使用单独的输出目录。
+
 ## 保险续保的模拟外呼
 
 这道合成用例可离线运行。承保系统独立发布报价，接通外呼后先核验身份，再取得对当前报价的明确同意。续保确认与报价送达分别计分。信贷逾期跟进目前仍是场景草案。
