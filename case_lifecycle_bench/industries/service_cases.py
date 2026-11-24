@@ -9,6 +9,7 @@ from .servicing.loan_disbursement import DISBURSEMENT
 from .servicing.loan_documents import APPLICATION
 from .servicing.loan_quote_change import QUOTE_CHANGE
 from .servicing.medical_clinic_cancel import CLINIC
+from .servicing.medical_intake_docs import INTAKE
 from .servicing.medical_preauth import PREAUTH
 from .servicing.medical_referral import REFERRAL
 from .servicing.repair_parts import REPAIR
@@ -32,6 +33,7 @@ WORKFLOWS = {
     "medical-referral": REFERRAL,
     "medical-preauth": PREAUTH,
     "medical-clinic-suspended": CLINIC,
+    "medical-intake-documents": INTAKE,
 }
 BY_TEMPLATE = {workflow.template: workflow for workflow in WORKFLOWS.values()}
 
