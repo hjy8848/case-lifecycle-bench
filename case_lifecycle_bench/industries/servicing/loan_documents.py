@@ -56,18 +56,18 @@ TOOLS = [
     _tool(
         "search_tickets",
         "Find the CRM ticket for a customer and application.",
-        {"user_id": "string", "subject_id": "string"},
+        {"user_id": "string", "application_id": "string"},
     ),
     _tool(
         "create_ticket",
         "Open one CRM ticket.",
-        {"user_id": "string", "subject_id": "string", "summary": "string"},
+        {"user_id": "string", "application_id": "string", "summary": "string"},
     ),
     _tool(
         "read_application",
         "Read the application system: status, required document, rejection reason, "
         "when the documents were completed, whether the review is overdue, and the decision.",
-        {"subject_id": "string"},
+        {"application_id": "string"},
     ),
     _tool(
         "send_message_to_user",
@@ -214,6 +214,7 @@ def generate(seed: int) -> dict:
 
 
 class LoanEnvironment(ServicingEnvironment):
+    SUBJECT_KEY = "application_id"
     def _initial_record(self, init):
         return {
             "subject_id": init["subject_id"],
@@ -291,7 +292,7 @@ def _run(
     invent_reason=False,
     ignore_overdue=False,
 ):
-    subject = {"subject_id": session["subject_id"]}
+    subject = {"application_id": session["application_id"]}
     user_id = session["user_id"]
     kind = session["trigger_type"]
     tickets = call("search_tickets", user_id=user_id, **subject)
@@ -422,7 +423,7 @@ def do_nothing(session, call):
 def close_early(session, call):
     if session["trigger_type"] != "case_intake":
         return "CONFIRMED" if session["trigger_type"] == "user_visit" else None
-    user_id, subject = session["user_id"], {"subject_id": session["subject_id"]}
+    user_id, subject = session["user_id"], {"application_id": session["application_id"]}
     ticket_id = call("create_ticket", user_id=user_id, summary="贷款申请", **subject)
     call("send_message_to_user", user_id=user_id, channel="secure_inbox", text="您的贷款已审批通过。")
     call("close_ticket", ticket_id=ticket_id, resolution_code="decided")

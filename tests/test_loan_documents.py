@@ -282,6 +282,17 @@ class ModelRunTest(unittest.TestCase):
         )
         self.assertIn("never promise a result or a time", l2.POLICY)
         self.assertIn("3 calendar days", l2.POLICY)
+        # The model sees the domain name, in the tools and in the session context.
+        properties = {
+            key
+            for tool in l2.TOOLS
+            for key in tool["function"]["parameters"]["properties"]
+        }
+        self.assertIn("application_id", properties)
+        self.assertNotIn("subject_id", properties)
+        seen = []
+        run_case(l2.generate(300), lambda session, call: seen.append(session) and None)
+        self.assertTrue(all("application_id" in s and "subject_id" not in s for s in seen))
 
     def test_visits_carry_a_goal_for_the_user_simulator(self):
         for case in map(l2.generate, SEEDS):

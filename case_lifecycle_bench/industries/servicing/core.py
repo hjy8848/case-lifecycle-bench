@@ -83,6 +83,8 @@ def conversation_success(chats, run):
 
 
 class ServicingEnvironment(LifecycleEnvironment):
+    # What the model calls the subject in session context and tool arguments.
+    SUBJECT_KEY = "subject_id"
     contact_tools: tuple[str, ...] = ()
 
     def __init__(self, case: dict, wake: str, customer=None):
@@ -127,7 +129,7 @@ class ServicingEnvironment(LifecycleEnvironment):
         )
 
     def _event_subject(self):
-        return {"user_id": self.user_id, "subject_id": self.subject_id}
+        return {"user_id": self.user_id, self.SUBJECT_KEY: self.subject_id}
 
     def _trigger(self, priority, payload):
         changes = {}
@@ -377,6 +379,12 @@ class ServicingEnvironment(LifecycleEnvironment):
         return {"delivered": True, "customer_says": reply}, {}
 
     def _call_tool(self, tool, args, session_id, step):
+        if self.SUBJECT_KEY != "subject_id" and self.SUBJECT_KEY in args:
+            # The model sees the domain name; the record and the trace keep one internal key.
+            args = {
+                ("subject_id" if key == self.SUBJECT_KEY else key): value
+                for key, value in args.items()
+            }
         result = super()._call_tool(tool, args, session_id, step)
         # Put the spoken words in the trace so claims on a call are judged like chat.
         if tool == "say_to_customer" and "delivered" in result:
