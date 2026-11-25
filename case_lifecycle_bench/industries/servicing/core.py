@@ -434,6 +434,11 @@ class ServicingEnvironment(LifecycleEnvironment):
     def _say_to_customer(self, contact, text):
         """The agent speaks on the live call; a simulated customer may answer."""
         contact_id = contact["contact_id"]
+        if contact["channel"] == "secure_chat":
+            # In a chat visit the customer answers through the chat itself, so what the agent
+            # says here only has to be delivered. (It used to fail with a KeyError that the
+            # model runner counted as a malformed call.)
+            return {"delivered": True}, {}
         dialogue = self.dialogues[contact_id]
         dialogue.append({"agent": text})
         if self.customer is None:

@@ -103,6 +103,31 @@ class SynchronousCallTest(unittest.TestCase):
         self.assertEqual(said, [], "a scripted customer says nothing back")
 
 
+class ChatContactSayTest(unittest.TestCase):
+    def test_say_to_customer_on_a_chat_contact_is_delivered_not_a_crash(self):
+        from case_lifecycle_bench.industries.servicing import medical_clinic_cancel as m3
+
+        case = {**m3.generate(301), "customer_mode": "llm"}
+        said = []
+
+        def agent(session, call):
+            if session["trigger_type"] == "user_visit" and session.get("contact_id"):
+                said.append(call("say_to_customer", contact_id=session["contact_id"], text="您好"))
+                said.append(call("say_to_customer", contact_id="C999", text="x"))
+            return None
+
+        run = run_case(case, agent, customer=lambda visit, dialogue: "好的")
+
+        self.assertEqual(said[0], {"delivered": True})
+        self.assertEqual(said[1], {"error": "contact_not_active"})
+        self.assertTrue(
+            any(
+                r["kind"] == "message" and r["role"] == "agent" and r["text"] == "您好"
+                for r in run["trajectory"]
+            )
+        )
+
+
 class SimulatedCustomerTest(unittest.TestCase):
     def test_the_customer_answers_what_the_agent_says_with_the_instance_persona(self):
         case = llm(first(l1, "wait"))

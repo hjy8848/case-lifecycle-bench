@@ -49,9 +49,15 @@ one() {  # one <template>:<mode>
 export -f one
 
 echo "$(date -Is) start tag=$TAG jobs=$JOBS workers=$WORKERS model=$MODEL" >> "$OUT/progress.log"
+ONLY=${ONLY:-}   # optional: space-separated template names to run instead of all of them
+export ONLY
 "$PYTHON" - <<'PY' | xargs -P "$JOBS" -I{} bash -c 'one {}'
+import os
 from case_lifecycle_bench.industries.service_cases import WORKFLOWS
+only = os.environ.get("ONLY", "").split()
 for name in WORKFLOWS:
+    if only and name not in only:
+        continue
     for mode in ("script", "llm"):
         print(f"{name}:{mode}")
 PY
