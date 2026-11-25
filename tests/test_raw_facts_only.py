@@ -49,7 +49,7 @@ class RawFactsOnlyTest(unittest.TestCase):
         env.t = __import__("datetime").datetime.fromisoformat(case["init"]["checklist_sent_at"])
         self.assertEqual(
             env._domain_execute("send_supplement_reminder", {"text": "x"}, "S1")[0],
-            {"error": "reminder_not_allowed"},
+            {"error": "reminder_not_allowed", "earliest_at": "2026-01-06T10:00:00"},
         )
 
 

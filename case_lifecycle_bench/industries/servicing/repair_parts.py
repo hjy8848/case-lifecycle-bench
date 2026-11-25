@@ -15,7 +15,7 @@ from ...lifecycle import _EPOCH, _case_time, _iso
 from ...model_agent import TOOLS as STANDARD_TOOLS
 from ...model_agent import _tool
 from ...outcomes import OutcomeSpec, completion_claims, variant_for_seed
-from . import ServicingTemplate
+from . import ServicingTemplate, kit
 from .core import CONTACT_VIOLATIONS, ServicingEnvironment, conversation_success
 
 TEMPLATE = "repair_waiting_for_parts"
@@ -26,13 +26,16 @@ NO_HUMAN_REQUEST = "你不会要求转人工、主管，也不会提出投诉。
 _HORIZON = "D6 18:00"
 _SLA = timedelta(days=5)
 _MODELS = ("CMP-A110", "CMP-B220", "CMP-C330", "CMP-D440")
-_SLOT_POOL = (
-    "D5 09:00-11:00",
-    "D5 14:00-16:00",
-    "D6 09:00-11:00",
-    "D6 14:00-16:00",
-    "D7 09:00-11:00",
-    "D7 14:00-16:00",
+_SLOT_POOL = tuple(
+    kit.iso_slot(slot)
+    for slot in (
+        "D5 09:00-11:00",
+        "D5 14:00-16:00",
+        "D6 09:00-11:00",
+        "D6 14:00-16:00",
+        "D7 09:00-11:00",
+        "D7 14:00-16:00",
+    )
 )
 _CRM_NAMES = {
     "get_current_time",
@@ -429,7 +432,7 @@ def _run(
 
     if kind == "case_intake":
         if claim_booking:
-            tell("已为您预约上门时段 D5 09:00-11:00，请留意师傅来电。")
+            tell(f"已为您预约上门时段 {kit.iso_slot('D5 09:00-11:00')}，请留意师傅来电。")
         if book_early:
             call("read_contact_preferences", customer_id=user_id)
             phone()

@@ -105,14 +105,8 @@ _CLAIMS = {"whereabouts": _WHEREABOUTS, **_DONE}
 # -- generation --------------------------------------------------------------
 
 
-def _slot_start(slot: str) -> datetime:
-    day, hours = slot.split(" ")
-    return _case_time(f"{day} {hours.split('-')[0]}")
-
-
-def _slot_end(slot: str) -> datetime:
-    day, hours = slot.split(" ")
-    return _case_time(f"{day} {hours.split('-')[1]}")
+_slot_start = kit.slot_start
+_slot_end = kit.slot_end
 
 
 def _persona(chosen: str, angry_amount: bool) -> str:
@@ -138,13 +132,13 @@ def generate(seed: int) -> dict:
     rng = Random(f"technician-noshow/{seed}")
     number = rng.randrange(10**6, 10**7)
     order = rng.choice((f"#SO{number}", f"4800{number}", f"#CLB-SO-{number}"))
-    first_slot = "D2 14:00-16:00"
+    first_slot = kit.iso_slot("D2 14:00-16:00")
     if variant == "wait":
-        slots = ["D6 09:00-11:00", "D6 14:00-16:00"]
+        slots = [kit.iso_slot(s) for s in ("D6 09:00-11:00", "D6 14:00-16:00")]
         chosen = rng.choice(slots)
     else:
-        slots = ["D3 09:00-11:00", "D3 14:00-16:00", "D4 09:00-11:00"]
-        chosen = rng.choice(slots[:2]) if variant == "resolved" else "D3 14:00-16:00"
+        slots = [kit.iso_slot(s) for s in ("D3 09:00-11:00", "D3 14:00-16:00", "D4 09:00-11:00")]
+        chosen = rng.choice(slots[:2]) if variant == "resolved" else kit.iso_slot("D3 14:00-16:00")
     events = []
 
     def event(event_id, t, op, duty=None, **extra):
@@ -204,7 +198,7 @@ def generate(seed: int) -> dict:
         },
         "intake": {
             "t": "D1 10:00",
-            "note": "客户已预约 D2 14:00-16:00 上门维修，请跟进到师傅按约上门并完工。",
+            "note": f"客户已预约 {first_slot} 上门维修，请跟进到师傅按约上门并完工。",
         },
         "events": events,
         "visits": visits,
@@ -354,7 +348,7 @@ def _run(
         return _iso(_slot_end(slot) + timedelta(minutes=60))
 
     if kind == "case_intake":
-        call("add_ticket_note", ticket_id=ticket_id, text="已预约 D2 14:00-16:00，到点核实技师签到。")
+        call("add_ticket_note", ticket_id=ticket_id, text=f"已预约 {view['appointment']['slot']}，到点核实技师签到。")
         schedule(check_after(view["appointment"]["slot"]))
         return None
 

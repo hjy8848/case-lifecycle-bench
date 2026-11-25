@@ -105,7 +105,7 @@ _DATE_PROMISE = (
     r"如果|若|待|等|未|无法|不能|不会",
 )
 _BOOKED = {"booked": r"已(?:为您)?(?:预约|约好|安排好)|预约成功"}
-_SLOTS = ["D7 09:00-11:00", "D7 14:00-16:00", "D8 09:00-11:00"]
+_SLOTS = [kit.iso_slot(s) for s in ("D7 09:00-11:00", "D7 14:00-16:00", "D8 09:00-11:00")]
 
 
 # -- generation --------------------------------------------------------------
@@ -264,7 +264,12 @@ class ReferralEnvironment(medical.MedicalEnvironment):
             return record, {}
         if tool == "follow_up_specialist":
             if not followup_due(record, self.t):
-                return {"error": "not_due"}, {}
+                earliest = (
+                    _iso(datetime.fromisoformat(record["sent_at"]) + _GAP)
+                    if record["followups_made"] == 0 and not record["specialist_replied"]
+                    else None
+                )
+                return {"error": "not_due", "earliest_at": earliest}, {}
             return {"ok": True}, {
                 "work_items": {
                     self.subject_id: {**record, "followups_made": 1, "last_followup_at": _iso(self.t)}

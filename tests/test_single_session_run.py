@@ -75,7 +75,7 @@ class SingleSessionTest(unittest.TestCase):
                 ]
                 system = [text for text in told if text.startswith("[系统]")]
                 self.assertGreaterEqual(len(system), len(notified))
-                self.assertTrue(any("现在是 D" in text for text in system))
+                self.assertTrue(any("现在是 2026-" in text for text in system))
                 self.assertTrue(
                     all(text.startswith("[系统]") or text.startswith("[系统") or "现在是" in text for text in system)
                 )

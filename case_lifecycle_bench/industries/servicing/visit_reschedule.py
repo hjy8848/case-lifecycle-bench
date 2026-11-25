@@ -91,7 +91,7 @@ TOOLS = [
 ]
 
 _DONE = {"changed": r"已(?:为您)?(?:改约|改好|改期|调整)(?:成功|完成)?"}
-_SLOTS = ["D8 14:00-16:00", "D9 14:00-16:00", "D10 09:00-11:00"]
+_SLOTS = [kit.iso_slot(s) for s in ("D8 14:00-16:00", "D9 14:00-16:00", "D10 09:00-11:00")]
 
 
 # -- generation --------------------------------------------------------------
@@ -141,11 +141,11 @@ def generate(seed: int) -> dict:
         "init": {
             "customer_id": f"SYN-CUS-{number}",
             "subject_id": order,
-            "slot": "D3 09:00-11:00",
+            "slot": kit.iso_slot("D3 09:00-11:00"),
             "prior_changes": 2 if variant == "escalate" else 0,
             "fee": _FEE,
         },
-        "intake": {"t": "D1 10:00", "note": "客户已预约 D3 09:00-11:00 上门安装，请建工单并留意客户的改约。"},
+        "intake": {"t": "D1 10:00", "note": f"客户已预约 {kit.iso_slot('D3 09:00-11:00')} 上门安装，请建工单并留意客户的改约。"},
         "events": [
             {
                 "id": "E1",
@@ -254,9 +254,7 @@ class RescheduleEnvironment(ChatContactMixin, ServicingEnvironment):
         }
 
 
-def _slot_start(slot: str) -> datetime:
-    day, hours = slot.split(" ")
-    return _case_time(f"{day} {hours.split('-')[0]}")
+_slot_start = kit.slot_start
 
 
 # -- agents --------------------------------------------------------------------

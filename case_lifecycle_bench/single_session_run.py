@@ -62,7 +62,8 @@ def describe(event: dict) -> str:
 
 
 def _label(t: datetime) -> str:
-    return f"D{(t - lifecycle._EPOCH).days + 1} {t:%H:%M}"
+    """The clock the way every tool shows it, so the agent never has to translate day numbers."""
+    return t.isoformat(timespec="minutes")
 
 
 def single_session_tools(tools):

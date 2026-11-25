@@ -156,7 +156,7 @@ class RecordTest(unittest.TestCase):
         first = datetime.fromisoformat(case["init"]["checklist_sent_at"]) + timedelta(hours=24)
         env.t = first - timedelta(hours=1)
         refused = env._domain_execute("send_supplement_reminder", {"text": "x"}, "S1")
-        self.assertEqual(refused[0], {"error": "reminder_not_allowed"})
+        self.assertEqual(refused[0]["error"], "reminder_not_allowed")
 
 
 class ModelRunTest(unittest.TestCase):

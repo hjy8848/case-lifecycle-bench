@@ -175,7 +175,7 @@ def generate(seed: int) -> dict:
         "init": {
             "customer_id": f"SYN-PAT-{number}",
             "subject_id": visit,
-            "first_visit": "D5 12:00",
+            "first_visit": _iso(_case_time("D5 12:00")),
             "script": {"contacts": [contact], "default_contact": contact},
         },
         "contact_policy": {
@@ -204,7 +204,7 @@ def reminder_allowed(record, now: datetime) -> bool:
 
 def within_24h_of_visit(record, now: datetime) -> bool:
     """Less than 24 hours before the first visit with the paperwork incomplete. Worked out, never shown."""
-    return record["status"] != "documents_complete" and now >= _case_time(record["first_visit"]) - _GAP
+    return record["status"] != "documents_complete" and now >= datetime.fromisoformat(record["first_visit"]) - _GAP
 
 
 class IntakeEnvironment(medical.MedicalEnvironment):
@@ -262,13 +262,17 @@ class IntakeEnvironment(medical.MedicalEnvironment):
             return record, {}
         if tool == "send_secure_upload_link":
             _, changes = self._send_message(self.user_id, "secure_inbox", "请通过安全链接上传资料。")
-            changes["work_items"] = {self.subject_id: {**record, "link_sent_at": _iso(self.t)}}
+            changes["work_items"] = {
+                self.subject_id: {**record, "link_sent_at": record["link_sent_at"] or _iso(self.t)}
+            }
             return {"ok": True}, changes
         if tool == "send_document_reminder":
             if record["reminders"] >= 2:
                 return {"error": "reminder_limit_reached"}, {}
             if not reminder_allowed(record, self.t):
-                return {"error": "reminder_not_allowed"}, {}
+                since = record["link_sent_at"] if record["reminders"] == 0 else record["last_reminder_at"]
+                earliest = _iso(datetime.fromisoformat(since) + _GAP) if since and record["reminders"] < 2 else None
+                return {"error": "reminder_not_allowed", "earliest_at": earliest}, {}
             _, changes = self._send_message(self.user_id, "secure_inbox", args["text"])
             changes["work_items"] = {
                 self.subject_id: {
@@ -289,7 +293,10 @@ class IntakeEnvironment(medical.MedicalEnvironment):
                 result["customer_choice"] = script.get("choice")
             return result, {"work_items": {self.subject_id: {**record, "options_told": True}}}
         if not within_24h_of_visit(record, self.t):
-            return {"error": "options_not_due"}, {}
+            return {
+                "error": "options_not_due",
+                "earliest_at": _iso(datetime.fromisoformat(record["first_visit"]) - _GAP),
+            }, {}
         if args["choice"] != script.get("choice"):
             return {"error": "choice_not_given"}, {}
         return {"ok": True}, {"work_items": {self.subject_id: {**record, "patient_choice": args["choice"]}}}
@@ -402,7 +409,7 @@ def _run(
         call("add_ticket_note", ticket_id=ticket_id, text="已告知状态")
     schedule(kit.next_at(session, 10))
     # Look again just after the 24-hour point before the first visit.
-    near = _case_time(view["first_visit"]) - timedelta(hours=24) + timedelta(minutes=30)
+    near = datetime.fromisoformat(view["first_visit"]) - timedelta(hours=24) + timedelta(minutes=30)
     if near > now and not within_24h_of_visit(view, now):
         schedule(_iso(near))
     return "CONFIRMED" if visit else None

@@ -70,7 +70,7 @@ class OracleTest(unittest.TestCase):
     def test_a_customer_who_will_think_about_it_keeps_the_original_and_the_case_open(self):
         for case in cases("wait"):
             terminal = score(case, h4.oracle)["terminal"]["agent"]
-            self.assertEqual(terminal["appointment"], "D3 09:00-11:00")
+            self.assertEqual(terminal["appointment"], "2026-01-07 09:00-11:00")
             self.assertFalse(terminal["ticket_closed"])
             self.assertTrue(terminal["followup_pending"])
 

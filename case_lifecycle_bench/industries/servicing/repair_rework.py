@@ -192,7 +192,7 @@ def generate(seed: int) -> dict:
             "utterance": rng.choice(
                 ("洗衣机昨天修完今天又漏水了，你们是不是又要收费？", "上次修完还是漏水，这次得重新收钱吗？")
             ),
-            "goal": "昨天刚修完的洗衣机又漏水，担心要重新收费，愿意按要求描述故障。" + kit.NO_HUMAN_REQUEST,
+            "goal": "昨天刚修完的洗衣机又漏水，担心要重新收费，愿意按要求描述故障。你会说稍后去拍照并通过链接上传，这次对话里不会声称已经上传好了。" + kit.NO_HUMAN_REQUEST,
         },
         {
             **revisit,
@@ -275,13 +275,25 @@ class ReworkEnvironment(ServicingEnvironment):
             }
         if tool == "send_upload_link":
             _, changes = self._send_message(self.user_id, "secure_inbox", "请通过安全链接上传故障照片。")
-            return {"ok": True}, changes
+            return {
+                "ok": True,
+                "note": "Photos uploaded through the link reach the order after processing, usually a few hours; "
+                "photos_received on the service order shows when they have.",
+            }, changes
         if tool == "dispatch_rework":
-            if not record["fault_report"] or not record["photos_received"]:
-                return {"error": "info_not_collected"}, {}
+            missing = [
+                name
+                for name, present in (
+                    ("fault_report", record["fault_report"]),
+                    ("photos", record["photos_received"]),
+                )
+                if not present
+            ]
+            if missing:
+                return {"error": "info_not_collected", "missing": missing}, {}
             if record["status"] != "completed":
                 return {"error": "rework_not_needed"}, {}
-            slot = "D4 09:00-11:00"
+            slot = kit.iso_slot("D4 09:00-11:00")
             return {"ok": True, "slot": slot}, {
                 "work_items": {
                     self.subject_id: {**record, "status": "rework_dispatched", "rework_slot": slot}
@@ -296,6 +308,8 @@ class ReworkEnvironment(ServicingEnvironment):
     def _contact_tool(self, tool, contact, args):
         record = self._record()
         script = self.contact_scripts[contact["contact_id"]]
+        if tool in {"ask_repair_result", "record_customer_confirmation"} and record["status"] != "rework_completed":
+            return {"error": "no_rework_completed"}, {}
         if tool == "ask_repair_result":
             result = {"delivered": True}
             if not self.hide_customer_intent:

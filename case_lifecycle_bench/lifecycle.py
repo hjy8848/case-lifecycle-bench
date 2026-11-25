@@ -216,6 +216,8 @@ class LifecycleEnvironment:
         else:
             raise ValueError(f"Unsupported injected fault: {fault!r}")
 
+        if result == {"error": "not_found"} and "ticket_id" in args:
+            result = {"error": "not_found", "hint": "no ticket has this id; find the ticket with search_tickets"}
         row = self._log(
             "tool_call",
             session_id,

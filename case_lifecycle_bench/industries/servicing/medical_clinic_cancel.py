@@ -23,9 +23,9 @@ TEMPLATE = "medical_clinic_suspended"
 _BLOCKED = {"slot_not_confirmed", "unavailable_slot", "not_cancelled"}
 _MAX_ATTEMPTS = 2
 _ALTERNATIVES = [
-    "D4 09:00-10:00 张医生（原医生）",
-    "D5 14:00-15:00 张医生（原医生）",
-    "D3 14:00-15:00 李医生（同科室）",
+    kit.iso_slot("D4 09:00-10:00 张医生（原医生）"),
+    kit.iso_slot("D5 14:00-15:00 张医生（原医生）"),
+    kit.iso_slot("D3 14:00-15:00 李医生（同科室）"),
 ]
 
 POLICY = f"""You are the outpatient scheduling assistant for a synthetic hospital. All actions occur in the fixture only.
@@ -167,7 +167,7 @@ def generate(seed: int) -> dict:
         "init": {
             "customer_id": f"SYN-PAT-{number}",
             "subject_id": appointment,
-            "slot": "D3 09:00-10:00",
+            "slot": kit.iso_slot("D3 09:00-10:00"),
             "followup_deadline": _iso(_case_time(deadline)) if deadline else None,
             "script": {"contacts": [contact], "default_contact": contact},
         },

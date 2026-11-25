@@ -286,6 +286,12 @@ def apply_three_outcomes(case: dict, run: dict, evaluation: dict) -> dict:
         json.dumps(case, sort_keys=True), _wake(run)
     )
     terminal = _signature(spec, case, run)
+    if run.get("single_session"):
+        # The Oracle's reference run is an ordinary one; an agent that never leaves the case has
+        # no follow-up to compare, so that key is dropped from both sides.
+        reference = json.loads(oracle_terminal)
+        reference.pop("followup_pending", None)
+        oracle_terminal = json.dumps(reference, sort_keys=True)
     business = spec.business_outcome(case, run)
     matches_oracle = json.dumps(terminal, sort_keys=True) == oracle_terminal
     single = bool(run.get("single_session"))

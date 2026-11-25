@@ -397,7 +397,13 @@ class ServicingEnvironment(LifecycleEnvironment):
             for row in self.state["contacts"].values()
         )
         if recent >= policy["max_attempts_per_rolling_24h"]:
-            return {"error": "rolling_attempt_limit"}, {}
+            oldest = min(
+                datetime.fromisoformat(row["started_at"])
+                for row in self.state["contacts"].values()
+                if row["channel"] == channel
+                and self.t - datetime.fromisoformat(row["started_at"]) < timedelta(hours=24)
+            )
+            return {"error": "rolling_attempt_limit", "earliest_at": _iso(oldest + timedelta(hours=24))}, {}
         index = len(self.state["contacts"])
         scripts = self.script.get("contacts", [])
         # Once the scripted calls are used up, the customer keeps answering the

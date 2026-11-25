@@ -133,6 +133,29 @@ def crm_tools():
     return [tool for tool in STANDARD_TOOLS if tool["function"]["name"] in CRM_NAMES]
 
 
+_SLOT_LABEL = re.compile(r"^D(\d+) (\d\d:\d\d(?:-\d\d:\d\d)?)(.*)$")
+_SLOT_ISO = re.compile(r"^(\d{4}-\d\d-\d\d) (\d\d:\d\d)(?:-(\d\d:\d\d))?")
+
+
+def iso_slot(text: str) -> str:
+    """'D2 14:00-16:00' as the date the model's clock uses: '2026-01-06 14:00-16:00'."""
+    match = _SLOT_LABEL.match(text)
+    if not match:
+        return text
+    day = _EPOCH + timedelta(days=int(match[1]) - 1)
+    return f"{day:%Y-%m-%d} {match[2]}{match[3]}"
+
+
+def slot_start(slot: str) -> datetime:
+    match = _SLOT_ISO.match(slot)
+    return datetime.fromisoformat(f"{match[1]}T{match[2]}:00")
+
+
+def slot_end(slot: str) -> datetime:
+    match = _SLOT_ISO.match(slot)
+    return datetime.fromisoformat(f"{match[1]}T{match[3] or match[2]}:00")
+
+
 def label(moment: datetime) -> str:
     return f"D{(moment - _EPOCH).days + 1} {moment:%H:%M}"
 

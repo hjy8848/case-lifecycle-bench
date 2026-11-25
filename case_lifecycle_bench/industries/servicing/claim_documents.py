@@ -258,7 +258,8 @@ class ClaimEnvironment(ServicingEnvironment):
             if record["reminders"] >= 2:
                 return {"error": "reminder_limit_reached"}, {}
             if not reminder_allowed(record, self.t):
-                return {"error": "reminder_not_allowed"}, {}
+                due = next_due(record)
+                return {"error": "reminder_not_allowed", "earliest_at": _iso(due) if due else None}, {}
             _, changes = self._send_message(self.user_id, "secure_inbox", args["text"])
             changes["work_items"] = {
                 self.subject_id: {
@@ -282,7 +283,8 @@ class ClaimEnvironment(ServicingEnvironment):
             return {"ok": True}, changes
         if tool == "suspend_claim":
             if not suspension_allowed(self._record(), self.t):
-                return {"error": "suspension_not_allowed"}, {}
+                due = next_due(self._record())
+                return {"error": "suspension_not_allowed", "earliest_at": _iso(due) if due else None}, {}
             return {"ok": True}, {
                 "work_items": {self.subject_id: {**self._record(), "status": "suspended"}}
             }

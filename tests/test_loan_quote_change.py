@@ -98,6 +98,7 @@ class SigningRulesTest(unittest.TestCase):
         case = cases("wait")[0]
         env = l4.QuoteEnvironment(case, "poll")
         env._apply(env._event_changes(case["events"][0]))
+        env.t = max(env.t, __import__("datetime").datetime.fromisoformat(env.state["work_items"][env.subject_id]["review_ends_at"]))
 
         self.assertEqual(env._domain_execute("sign_contract", {"version": "Q2"}, "S1")[0], {"error": "missing_agreement"})
         self.assertEqual(env._domain_execute("sign_contract", {"version": "Q1"}, "S1")[0], {"error": "stale_version"})

@@ -99,6 +99,7 @@ class SettlementRulesTest(unittest.TestCase):
         case = cases("wait")[0]
         env = i4.RevisionEnvironment(case, "poll")
         env._apply(env._event_changes(case["events"][0]))
+        env.t = max(env.t, __import__("datetime").datetime.fromisoformat(env.state["work_items"][env.subject_id]["review_ends_at"]))
         amount = case["events"][0]["amount"]
 
         refused = env._execute("proceed_with_assessment", {"version": "A2", "amount": amount}, "S1")[0]
@@ -111,6 +112,7 @@ class SettlementRulesTest(unittest.TestCase):
         case = cases("resolved", "up")[0]
         env = i4.RevisionEnvironment(case, "poll")
         env._apply(env._event_changes(case["events"][0]))
+        env.t = max(env.t, __import__("datetime").datetime.fromisoformat(env.state["work_items"][env.subject_id]["review_ends_at"]))
 
         accepted = env._execute(
             "proceed_with_assessment", {"version": "A2", "amount": case["events"][0]["amount"]}, "S1"
