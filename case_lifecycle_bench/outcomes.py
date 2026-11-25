@@ -98,6 +98,10 @@ def _spec(template: str) -> OutcomeSpec:
         from .cases.t3_outcomes import SPEC
 
         return SPEC
+    if template in {"refund_silent_failure", "cross_channel_revisit", "refund_timeout_committed"}:
+        from .cases import refund_eval, t1, t2
+
+        return refund_eval.spec(t2.oracle if template == "refund_timeout_committed" else t1.oracle)
     from .industries.service_cases import BY_TEMPLATE
 
     workflow = BY_TEMPLATE.get(template)

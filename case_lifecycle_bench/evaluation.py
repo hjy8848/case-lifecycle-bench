@@ -227,6 +227,9 @@ def evaluate_t1(case: dict, run: dict) -> dict:
     }
 
 
+_REFUND_TEMPLATES = {"refund_silent_failure", "refund_timeout_committed", "cross_channel_revisit"}
+
+
 def _servicing_templates():
     from .industries.service_cases import BY_TEMPLATE
 
@@ -242,7 +245,11 @@ def evaluate_case(case: dict, run: dict) -> dict:
         "cross_channel_revisit": evaluate_t9,
     }
     template = case["template"]
-    if template == "insurance_renewal_quote_followup":
+    if template in _REFUND_TEMPLATES and case.get("terminal_variant"):
+        from .cases.refund_eval import evaluate_refund
+
+        evaluation = evaluate_refund(case, run)
+    elif template == "insurance_renewal_quote_followup":
         from .industries.insurance.evaluation import evaluate_insurance
 
         evaluation = evaluate_insurance(case, run)

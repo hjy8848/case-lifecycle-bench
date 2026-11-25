@@ -69,7 +69,7 @@ _LAST = (
 ID_STYLES = ("w7", "numeric", "clb")
 
 
-def synthetic_identity(style: str, seed: int) -> dict:
+def synthetic_identity(style: str, seed: int, tag: str = "T3") -> dict:
     """Draw a reproducible order ID, customer ID and amount for one seed."""
     if style not in ID_STYLES:
         raise ValueError(f"Unknown ID style: {style!r}")
@@ -82,14 +82,18 @@ def synthetic_identity(style: str, seed: int) -> dict:
     elif style == "numeric":
         order_id = f"{rng.randrange(10**5, 10**6)}{suffix}"
     else:
-        order_id = f"#CLB-T3-{seed:03d}"
+        order_id = f"#CLB-{tag}-{seed:03d}"
     return {"order_id": order_id, "user_id": user_id, "amount": amount}
 
 
 def sweep_case(style: str, seed: int) -> dict:
     """Bind one synthetic identity into an otherwise unchanged T3 case."""
-    identity = synthetic_identity(style, seed)
-    case = t3.t3_case()
+    return bind_case(t3.t3_case(), style, seed)
+
+
+def bind_case(case: dict, style: str, seed: int, tag: str = "T3") -> dict:
+    """Bind one synthetic identity into any retail case that uses the fixture's U1 and O1."""
+    identity = synthetic_identity(style, seed, tag)
     names = {
         case["init"]["order"]: identity["order_id"],
         case["init"]["user"]: identity["user_id"],

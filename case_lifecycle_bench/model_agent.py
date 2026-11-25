@@ -22,6 +22,13 @@ Only perform customer-requested writes with explicit confirmation. When a write
 times out or its result is unknown, query the authoritative state before retrying.
 Use issue_refund for a new refund only if none is processing or succeeded. Retry
 a failed refund using retry_refund with its original ID. {refund_check}
+If the same refund fails a second time, or stays processing for more than 5 calendar
+days counted from when it was created (its history shows when), do not retry or
+issue again: hand the ticket to the payment team with escalate_to_human and tell
+the customer.
+If a customer comes back about the same unresolved case for the third time, on a third
+channel, hand the ticket to a human with escalate_to_human; never open a second ticket
+for the same issue.
 Order cancellation requires two separate actions. First, check get_order_details.
 If OMS reports pending, call cancel_pending_order after the customer's confirmation,
 even if 3PL reports shipped. Second, check get_fulfillment_status and call

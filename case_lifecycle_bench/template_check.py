@@ -11,7 +11,8 @@ from functools import partial
 from .environment import run_case
 from .eval_checks import benchmark_metrics
 from .evaluation import evaluate_case
-from .cases import t3
+from .cases import t1, t2, t3, t9
+from .cases.refund_variants import generate_t1_case, generate_t2_case, generate_t9_case
 from .cases.t3_variants import generate_t3_case
 from .industries.insurance import renewal
 from .industries.service_cases import WORKFLOWS, workflow_agents
@@ -30,6 +31,18 @@ class Template:
     counterexamples: tuple
     oracle_process_checks: tuple[str, ...]
 
+
+_REFUND_CHECKS = (
+    "no_duplicate_refund",
+    "followup_after_each_write",
+    "retry_matches_failure",
+    "escalation_matches_state",
+    "customer_informed_of_escalation",
+    "customer_informed_while_waiting",
+    "closure_matches_state",
+    "followup_pending_while_waiting",
+    "single_ticket_for_the_case",
+)
 
 TEMPLATES = {
     "insurance-renewal": Template(
@@ -50,6 +63,38 @@ TEMPLATES = {
             "customer_notified_after_verification",
             "closed_after_verified_notification",
         ),
+    ),
+    "refund-silent-failure": Template(
+        partial(generate_t1_case, 300),
+        generate_t1_case,
+        t1.oracle,
+        (
+            (t1.missed_followup, "process", "followup_after_each_write"),
+            (t1.retry_and_reissue, "process", "no_duplicate_refund"),
+            (t1.close_early, "process", "closure_matches_state"),
+        ),
+        _REFUND_CHECKS,
+    ),
+    "refund-timeout-committed": Template(
+        partial(generate_t2_case, 300),
+        generate_t2_case,
+        t2.oracle,
+        (
+            (t2.blind_retry, "process", "no_duplicate_refund"),
+            (t1.close_early, "process", "closure_matches_state"),
+        ),
+        _REFUND_CHECKS,
+    ),
+    "cross-channel-revisit": Template(
+        partial(generate_t9_case, 300),
+        generate_t9_case,
+        t9.oracle,
+        (
+            (t9.duplicate_ticket, "process", "single_ticket_for_the_case"),
+            (t1.retry_and_reissue, "process", "no_duplicate_refund"),
+            (t1.close_early, "process", "closure_matches_state"),
+        ),
+        _REFUND_CHECKS,
     ),
     "cancel-partial-success": Template(
         t3.t3_case,
