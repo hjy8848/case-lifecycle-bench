@@ -88,7 +88,7 @@ class GenerationTest(unittest.TestCase):
                 _case_time(e["t"]) for e in case["events"] if e["op"] == "document_checked" and e["ok"]
             )
             self.assertGreater(completed.timestamp() + 72 * 3600, horizon.timestamp())
-            self.assertFalse([e for e in case["events"] if e["op"] in {"decision", "review_overdue"}])
+            self.assertFalse([e for e in case["events"] if e["op"] in {"decision", "review_ping"}])
         for case in make(MANY, "resolved"):
             self.assertEqual(event(case, "E6")["op"], "decision")
 

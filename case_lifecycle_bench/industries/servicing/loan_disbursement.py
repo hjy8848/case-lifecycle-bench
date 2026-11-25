@@ -34,7 +34,7 @@ The context starts fresh with each wake; use the CRM ticket for what you need to
 The core system is authoritative: a disbursement has arrived only when read_disbursement shows it disbursed.
 Never disburse the same loan twice. If the disbursement call times out, read_disbursement before anything else. Only a disbursement that failed can be submitted again.
 When it failed because of the account information, the customer's identity must be verified and the customer must confirm a new account in their own name before it is submitted again.
-If a disbursement stays processing for more than 2 calendar days (read_disbursement shows since when and whether it is overdue), escalate to disbursement operations with escalate_to_human and tell the customer.
+If a disbursement stays processing for more than 2 calendar days (read_disbursement shows when each disbursement started), escalate to disbursement operations with escalate_to_human and tell the customer.
 Tell the customer the result, and what is needed when a disbursement fails. Close the ticket only after the money has arrived and the customer has been told.
 In a secure-chat visit the context carries the contact id of that chat. Use ISO virtual timestamps. The calendar starts Monday 2026-01-05. End each session when the current work is done."""
 
@@ -53,7 +53,7 @@ TOOLS = [
     _tool(
         "read_disbursement",
         "Read the core system: loan status, the receiving account, every disbursement "
-        "with its state and start time, and whether one is overdue.",
+        "with its state and start time.",
         {"loan_id": "string"},
     ),
     _tool(
@@ -112,9 +112,9 @@ def generate(seed: int) -> dict:
             {
                 "id": "E1",
                 "t": marked,
-                "op": "disbursement_overdue",
+                "op": "status_ping",
                 "notify_agent": True,
-                "duty": "credit.disbursement_overdue",
+                "duty": "credit.disbursement_status",
             }
         )
         revisit_t = kit.shift(marked, hours=12)
@@ -204,6 +204,15 @@ def generate(seed: int) -> dict:
 # -- environment ---------------------------------------------------------------
 
 
+def stuck_since(latest, now: datetime) -> bool:
+    """A disbursement still processing more than 2 calendar days after it started."""
+    return (
+        latest is not None
+        and latest["state"] == "processing"
+        and now >= datetime.fromisoformat(latest["started_at"]) + _STUCK
+    )
+
+
 class DisbursementEnvironment(ChatContactMixin, ServicingEnvironment):
     SUBJECT_KEY = "loan_id"
     contact_tools = ("confirm_new_account",)
@@ -216,7 +225,7 @@ class DisbursementEnvironment(ChatContactMixin, ServicingEnvironment):
             "amount": init["amount"],
             "account": {"number": init["old_account"], "holder": init["borrower_name"]},
             "disbursements": [],
-            "overdue": False,
+            "finance_last_checked_at": None,
         }
 
     def _record(self):
@@ -244,21 +253,15 @@ class DisbursementEnvironment(ChatContactMixin, ServicingEnvironment):
         elif op == "disbursement_succeeded" and len(record["disbursements"]) > 1:
             rows = [*record["disbursements"][:-1], {**latest, "state": "disbursed"}]
             new = {**record, "status": "disbursed", "disbursements": rows}
-        elif op == "disbursement_overdue":
-            new = {**record, "overdue": True}
+        elif op == "status_ping":
+            new = {**record, "finance_last_checked_at": _iso(self.t)}
         else:
             return {}
         return {"work_items": {self.subject_id: new}}
 
     def _view(self):
-        record = self._record()
-        latest = record["disbursements"][-1] if record["disbursements"] else None
-        overdue = record["overdue"] or (
-            latest is not None
-            and latest["state"] == "processing"
-            and self.t >= datetime.fromisoformat(latest["started_at"]) + _STUCK
-        )
-        return {**record, "overdue": overdue}
+        # Raw facts only: every disbursement with its start time. Whether one has stuck is the agent's call.
+        return self._record()
 
     def _domain_execute(self, tool, args, session_id):
         record = self._record()
@@ -366,7 +369,7 @@ def _run(session, call, *, resend=False, same_account=False, claim_early=False, 
         cancel_followups()
         call("close_ticket", ticket_id=ticket_id, resolution_code="disbursed")
         return "CONFIRMED" if visit else None
-    if view["overdue"] and latest and latest["state"] == "processing":
+    if stuck_since(latest, datetime.fromisoformat(session["t"])):
         if not skip_escalation and "已转放款运营" not in notes:
             tell("您的放款处理超过 2 天仍无结果，已转交放款运营处理，我们会通知您结果。")
             call("escalate_to_human", ticket_id=ticket_id, note="放款处理超过 2 天无结果，转放款运营。")
@@ -477,9 +480,7 @@ def evaluate(case: dict, run: dict) -> dict:
     ]
     arrived = record["status"] == "disbursed"
     latest = record["disbursements"][-1] if record["disbursements"] else None
-    stuck = latest is not None and latest["state"] == "processing" and (
-        record["overdue"] or horizon >= datetime.fromisoformat(latest["started_at"]) + _STUCK
-    )
+    stuck = stuck_since(latest, horizon)
     arrived_reads = [row for row in reads if row["result"]["status"] == "disbursed"]
     failed_reads = [row for row in reads if row["result"]["status"] == "disbursement_failed"]
 
@@ -552,7 +553,7 @@ def business_outcome(case, run):
     if record["status"] == "disbursed":
         return "resolved"
     latest = record["disbursements"][-1] if record["disbursements"] else None
-    if latest is not None and latest["state"] == "processing" and record["overdue"]:
+    if stuck_since(latest, _case_time(case["horizon"])):
         return "stuck"
     return "in_progress"
 

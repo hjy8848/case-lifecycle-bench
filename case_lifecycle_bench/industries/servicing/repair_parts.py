@@ -52,7 +52,7 @@ The context starts fresh with each wake; use the CRM ticket for what you need to
 A repair needs a part transferred from the regional warehouse. The part is ready only when read_repair_order shows it has reached the branch and its model matches the repair order. Shipped is not ready.
 Offer a visit only after the part is ready. Choose the slot from the scheduling system's available slots and have the customer confirm it. Never promise a slot the customer has not confirmed.
 If the part arrives with the wrong model, order it again.
-If a part has been in transit for more than 5 calendar days, counted from when it was last ordered (the repair order shows when, and whether the limit is exceeded), escalate to procurement with escalate_to_human.
+If a part has been in transit for more than 5 calendar days, counted from when it was last ordered (the repair order shows when), escalate to procurement with escalate_to_human.
 Tell the customer only what the system shows, and keep them informed of progress. Close the ticket only after the visit is booked, the customer has the confirmation, and no follow-up is pending.
 Use ISO virtual timestamps. The calendar starts Monday 2026-01-05. End each session when the current work is done."""
 
@@ -71,7 +71,7 @@ TOOLS = [
     _tool(
         "read_repair_order",
         "Read the repair order: part status and model, order time, reorder count, "
-        "whether the 5-day limit is exceeded, and the appointment.",
+        "and the appointment.",
         {"subject_id": "string"},
     ),
     _tool(
@@ -192,7 +192,7 @@ def generate(seed: int) -> dict:
         delay = rng.choice((30, 40)) if variant == "resolved" else rng.choice((105, 110))
         event("E2", "part_arrived", arrival, on=reorder_on, after=f"{delay}h", model_ok=True)
     else:
-        event("E1", "sla_exceeded", "repair.escalate_procurement", t="D6 10:00")
+        event("E1", "status_ping", "repair.status_update", t="D6 10:00")
     visits = [
         {
             "id": "V2",
@@ -250,6 +250,14 @@ def generate(seed: int) -> dict:
 # -- environment ---------------------------------------------------------------
 
 
+def sla_exceeded(record, now: datetime) -> bool:
+    """A part still in transit more than 5 calendar days after it was last ordered. Worked out, never shown."""
+    return (
+        record["status"] == "in_transit"
+        and now >= datetime.fromisoformat(record["ordered_at"]) + timedelta(days=5)
+    )
+
+
 class RepairEnvironment(ServicingEnvironment):
     contact_tools = ("offer_available_slots", "book_appointment")
 
@@ -261,7 +269,7 @@ class RepairEnvironment(ServicingEnvironment):
             "part_model_received": None,
             "ordered_at": init["ordered_at"],
             "reorder_count": 0,
-            "sla_exceeded": False,
+            "last_status_check_at": None,
             "appointment": None,
         }
 
@@ -269,8 +277,8 @@ class RepairEnvironment(ServicingEnvironment):
         record = self.state["work_items"][self.subject_id]
         if record["status"] != "in_transit":
             return {}
-        if event["op"] == "sla_exceeded":
-            return {"work_items": {self.subject_id: {**record, "sla_exceeded": True}}}
+        if event["op"] == "status_ping":
+            return {"work_items": {self.subject_id: {**record, "last_status_check_at": _iso(self.t)}}}
         if event["op"] != "part_arrived":
             raise ValueError(f"Unsupported world event: {event['op']!r}")
         ok = event["model_ok"]
@@ -442,7 +450,7 @@ def _run(
         call("add_ticket_note", ticket_id=ticket_id, text="到货型号不符，已重新调货。")
         schedule_check()
     elif status == "in_transit":
-        if record["sla_exceeded"] and not ignore_sla:
+        if sla_exceeded(record, datetime.fromisoformat(session["t"])) and not ignore_sla:
             if "已转采购" not in notes:
                 tell("配件调货已超过 5 天仍未到，我们已升级采购加急处理，会继续跟进并通知您。")
                 call("escalate_to_human", ticket_id=ticket_id, note="调货超过 5 天未到，升级采购。")
@@ -503,7 +511,7 @@ def _replay_starts(trajectory, initial_state):
             starts[row["session_id"]] = {
                 "status": record["status"],
                 "reorders": record["reorder_count"],
-                "sla": record["sla_exceeded"],
+                "sla": sla_exceeded(record, datetime.fromisoformat(row["t"])),
                 "booked": bool(record["appointment"]),
                 "closed": closed,
                 "handoffs": handoffs,
@@ -584,7 +592,7 @@ def evaluate(case: dict, run: dict) -> dict:
         for row in trajectory
     )
     booked = bool(record["appointment"])
-    escalated = record["sla_exceeded"]
+    escalated = sla_exceeded(record, horizon)
 
     def told_after(read_ok):
         return any(
@@ -630,7 +638,7 @@ def evaluate(case: dict, run: dict) -> dict:
         "customer_informed_while_waiting": not waiting
         or told_after(lambda result: result["status"] == "in_transit"),
         "customer_informed_of_escalation": not escalated
-        or told_after(lambda result: result["sla_exceeded"]),
+        or all(any(checks.same_session(hand, note) for note in messages) for hand in handoffs),
         "followup_pending_while_waiting": not waiting
         or any(
             row["status"] == "pending"
@@ -703,7 +711,7 @@ def business_outcome(case, run):
     record = _record(run)
     if record["appointment"]:
         return "resolved"
-    if record["sla_exceeded"]:
+    if sla_exceeded(record, _case_time(case["horizon"])):
         return "part_overdue"
     return "in_progress"
 

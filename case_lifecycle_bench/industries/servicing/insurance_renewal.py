@@ -43,7 +43,7 @@ _CONSENT_ERRORS = {"consent_not_given", "missing_current_quote_consent"}
 
 POLICY = """You are the renewal servicing agent for a synthetic insurer. All actions occur in the fixture only.
 The context starts fresh with each wake; use the CRM ticket for what you need to remember. Reuse one ticket for the customer and policy.
-The underwriting system is authoritative. The renewal quote is current only when read_renewal_quote shows it ready, and it can be revised at any time. read_policy shows the renewal state, the coverage expiry and whether the policy is within 24 hours of expiry.
+The underwriting system is authoritative. The renewal quote is current only when read_renewal_quote shows it ready, and it can be revised at any time. read_policy shows the renewal state and the coverage expiry time.
 Contact the customer by voice on your own initiative only between 09:00 and 18:00, at most once in any 24 hours, and only with the customer's opt-in; the customer's own messages are not limited. Never start a voice attempt after the renewal is confirmed.
 Verify the customer's identity before discussing the quote.
 Submit a renewal only after the customer has explicitly accepted the current quote version. Consent covers that version only: when the quote is revised, obtain fresh consent before submitting.
@@ -66,8 +66,7 @@ TOOLS = [
     ),
     _tool(
         "read_policy",
-        "Read the policy system: renewal state, coverage expiry, whether it is within "
-        "24 hours of expiry and the accepted quote version.",
+        "Read the policy system: renewal state, coverage expiry time and the accepted quote version.",
         {"policy_id": "string"},
     ),
     _tool(
@@ -207,16 +206,9 @@ def generate(seed: int) -> dict:
     else:
         quiet = rng.choice((undecided, silent))
         contacts, default, visit_script = [quiet], quiet, undecided
+        # Less than 24 hours remain from `lapse` on. Nothing in the world marks that moment:
+        # the agent reads the expiry from the policy and works the clock out itself.
         lapse = rng.choice(("D4 13:00", "D5 10:00", "D5 15:00"))
-        events.append(
-            {
-                "id": "E2",
-                "t": lapse,
-                "op": "lapse_window",
-                "notify_agent": True,
-                "duty": "insurance.lapse_warning",
-            }
-        )
         expires = _shift(lapse, hours=24)
     goal = _persona(bool(visit_script["accepts"])) + NO_HUMAN_REQUEST
     return {
@@ -262,6 +254,16 @@ def generate(seed: int) -> dict:
 # -- environment ---------------------------------------------------------------
 
 
+def lapse_point(record) -> datetime:
+    """The moment 24 hours before the coverage expires."""
+    return datetime.fromisoformat(record["expires_at"]) - timedelta(hours=24)
+
+
+def lapse_due(record, now: datetime) -> bool:
+    """Less than 24 hours to expiry without a confirmed renewal. Worked out, never shown."""
+    return record["renewal_state"] != "confirmed" and now >= lapse_point(record)
+
+
 class RenewalEnvironment(ChatContactMixin, ServicingEnvironment):
     SUBJECT_KEY = "policy_id"
     contact_tools = ("present_renewal_quote", "record_quote_consent", "submit_renewal")
@@ -276,7 +278,6 @@ class RenewalEnvironment(ChatContactMixin, ServicingEnvironment):
             "policy_id": init["subject_id"],
             "renewal_state": "pending",
             "expires_at": init["expires_at"],
-            "within_24h_of_expiry": False,
             "accepted_quote_version": None,
             "confirmed_at": None,
             "quote": {"status": "under_review", "version": None, "premium": None},
@@ -295,8 +296,6 @@ class RenewalEnvironment(ChatContactMixin, ServicingEnvironment):
                 **record,
                 "quote": {"status": "ready", "version": "Q2", "premium": event["premium"]},
             }
-        elif event["op"] == "lapse_window" and record["renewal_state"] != "confirmed":
-            new = {**record, "within_24h_of_expiry": True}
         else:
             return {}
         return {"work_items": {self.subject_id: new}}
@@ -439,7 +438,7 @@ def _run(
         pending = [
             task
             for task in call("list_followups", ticket_id=ticket_id)
-            if task["status"] == "pending" and task["due_at"] >= due
+            if task["status"] == "pending" and task["due_at"] == due
         ]
         if not pending:
             call("schedule_followup", ticket_id=ticket_id, due_at=due, note="复查续保报价并联系客户")
@@ -449,12 +448,19 @@ def _run(
             if task["status"] == "pending":
                 call("cancel_followup", task_id=task["task_id"])
 
+    def check_before_expiry(record):
+        """Look again just after the point 24 hours before the coverage expires."""
+        due = lapse_point(record) + timedelta(minutes=30)
+        if due > datetime.fromisoformat(session["t"]):
+            schedule(_iso(due))
+
     if kind == "case_intake":
-        call("read_policy", **subject)
+        initial = call("read_policy", **subject)
         call("read_renewal_quote", **subject)
         due = _iso(_case_time("D2 08:00")) if early else _iso(_case_time("D2 09:00"))
         call("schedule_followup", ticket_id=ticket_id, due_at=due, note="复查续保报价")
         call("add_ticket_note", ticket_id=ticket_id, text="已安排复查，等核保系统发布续保报价。")
+        check_before_expiry(initial)
         return None
 
     ticket = call("get_ticket", ticket_id=ticket_id)
@@ -509,7 +515,7 @@ def _run(
         return True
 
     def lapse():
-        if policy["within_24h_of_expiry"] and policy["renewal_state"] != "confirmed" and not ignore_lapse:
+        if lapse_due(policy, now) and not ignore_lapse:
             if "已转人工" not in notes:
                 call(
                     "send_message_to_user",
@@ -540,7 +546,7 @@ def _run(
             call("say", text="您的续保已成功，已生效。")
         if call("read_policy", **subject)["renewal_state"] != "confirmed":
             lapse()
-            if not policy["within_24h_of_expiry"]:
+            if not lapse_due(policy, now):
                 schedule(_next_nine(session))
         return "CONFIRMED"
 
@@ -558,11 +564,13 @@ def _run(
             talk(started["contact_id"])
         elif started.get("status") == "no_answer":
             call("add_ticket_note", ticket_id=ticket_id, text="客户未接听，在次数限制内再联系。")
-    if call("read_policy", **subject)["renewal_state"] != "confirmed":
+    after = call("read_policy", **subject)
+    if after["renewal_state"] != "confirmed":
         if attempted or (quote["status"] == "ready" and last is not None and not due_again):
             schedule(_retry_time(last if not attempted else now))
         else:
             schedule(_next_nine(session))
+        check_before_expiry(after)
     return None
 
 
@@ -619,7 +627,7 @@ def _replay_starts(trajectory, initial_state):
         if row["kind"] == "session_start":
             starts[row["session_id"]] = {
                 "confirmed": record["renewal_state"] == "confirmed",
-                "lapse": record["within_24h_of_expiry"],
+                "lapse": lapse_due(record, datetime.fromisoformat(row["t"])),
                 "closed": closed,
                 "handoffs": handoffs,
             }
@@ -707,7 +715,7 @@ def evaluate(case: dict, run: dict) -> dict:
         )
 
     first_attempt = min((checks.record_time(row) for row in attempts), default=None)
-    flagged = record["within_24h_of_expiry"] and not confirmed
+    flagged = lapse_due(record, horizon)
     process = {
         "proactive_contact_by_deadline": ready is None
         or horizon < deadline
@@ -771,7 +779,7 @@ def evaluate(case: dict, run: dict) -> dict:
         "outcome": {
             "renewal_confirmed": confirmed,
             "ticket_closed": bool(closes),
-            "lapse_window_open": bool(record["within_24h_of_expiry"]),
+            "lapse_window_open": lapse_due(record, horizon),
         },
         "process": process,
         "content": content,
@@ -792,7 +800,7 @@ def business_outcome(case, run):
     record = _final(run)
     if record["renewal_state"] == "confirmed":
         return "resolved"
-    if record["within_24h_of_expiry"]:
+    if lapse_due(record, _case_time(case["horizon"])):
         return "lapse_imminent"
     return "in_progress"
 

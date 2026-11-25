@@ -153,7 +153,7 @@ class RecordTest(unittest.TestCase):
     def test_reminders_are_limited_and_spaced_by_the_system(self):
         case = cases("escalate")[0]
         env = i2.ClaimEnvironment(case, "poll")
-        first = datetime.fromisoformat(case["init"]["first_reminder_at"])
+        first = datetime.fromisoformat(case["init"]["checklist_sent_at"]) + timedelta(hours=24)
         env.t = first - timedelta(hours=1)
         refused = env._domain_execute("send_supplement_reminder", {"text": "x"}, "S1")
         self.assertEqual(refused[0], {"error": "reminder_not_allowed"})
@@ -165,7 +165,7 @@ class ModelRunTest(unittest.TestCase):
         self.assertTrue(
             {"read_claim", "send_supplement_reminder", "suspend_claim", "close_ticket"} <= names
         )
-        self.assertIn("At most 2 reminders", i2.POLICY)
+        self.assertIn("at most 2 reminders", i2.POLICY)
         for case in map(i2.generate, SEEDS):
             for visit in case["visits"]:
                 self.assertTrue(visit["goal"] and visit["utterance"])

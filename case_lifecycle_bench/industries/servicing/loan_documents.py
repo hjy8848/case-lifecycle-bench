@@ -66,7 +66,7 @@ TOOLS = [
     _tool(
         "read_application",
         "Read the application system: status, required document, rejection reason, "
-        "when the documents were completed, whether the review is overdue, and the decision.",
+        "when the documents were completed, and the decision.",
         {"application_id": "string"},
     ),
     _tool(
@@ -164,7 +164,7 @@ def generate(seed: int) -> dict:
         event(
             "E6",
             _shift(completed, hours=72),
-            "review_overdue",
+            "review_ping",
             "credit.escalate_supervisor",
         )
     visits = [
@@ -213,6 +213,16 @@ def generate(seed: int) -> dict:
 # -- environment ---------------------------------------------------------------
 
 
+def review_overdue(record, now: datetime) -> bool:
+    """No decision 3 calendar days after the documents became complete. Worked out, never shown."""
+    return (
+        record["status"] == "document_received"
+        and not record["decision"]
+        and record["complete_at"] is not None
+        and now >= datetime.fromisoformat(record["complete_at"]) + _REVIEW_LIMIT
+    )
+
+
 class LoanEnvironment(ServicingEnvironment):
     SUBJECT_KEY = "application_id"
     def _initial_record(self, init):
@@ -223,7 +233,7 @@ class LoanEnvironment(ServicingEnvironment):
             "rejection_reason": None,
             "rejection_text": None,
             "complete_at": None,
-            "review_overdue": False,
+            "last_review_check_at": None,
             "decision": None,
             "decision_reason": None,
         }
@@ -258,8 +268,8 @@ class LoanEnvironment(ServicingEnvironment):
                 "decision": event["decision"],
                 "decision_reason": event.get("reason"),
             }
-        elif op == "review_overdue" and status == "document_received":
-            new = {**record, "review_overdue": True}
+        elif op == "review_ping" and status == "document_received":
+            new = {**record, "last_review_check_at": _iso(self.t)}
         else:
             return {}
         return {"work_items": {self.subject_id: new}}
@@ -353,7 +363,7 @@ def _run(
         tell(text)
         cancel_followups()
         call("close_ticket", ticket_id=ticket_id, resolution_code="decided")
-    elif record["review_overdue"] and not ignore_overdue:
+    elif review_overdue(record, datetime.fromisoformat(session["t"])) and not ignore_overdue:
         if "已转主管" not in notes:
             tell("材料齐全后审批中心超过 3 天仍未出结论，我们已升级审批主管跟进，有进展会第一时间通知您。")
             call("escalate_to_human", ticket_id=ticket_id, note="材料齐全后超过 3 天无结论，升级审批主管。")
@@ -441,7 +451,7 @@ def _replay_starts(trajectory, initial_state):
         if row["kind"] == "session_start":
             starts[row["session_id"]] = {
                 "decision": record["decision"],
-                "overdue": record["review_overdue"],
+                "overdue": review_overdue(record, datetime.fromisoformat(row["t"])),
                 "closed": closed,
                 "handoffs": handoffs,
             }
@@ -536,7 +546,7 @@ def evaluate(case: dict, run: dict) -> dict:
         )
 
     decided = bool(record["decision"])
-    overdue = record["review_overdue"]
+    overdue = review_overdue(record, horizon)
     waiting = not decided and not overdue
     process = {
         "requirement_relayed": told(lambda r: r["status"] == "documents_required"),
@@ -550,7 +560,9 @@ def evaluate(case: dict, run: dict) -> dict:
         "customer_informed_while_waiting": not waiting
         or told(lambda r: r["status"] == "document_received"),
         "customer_informed_of_escalation": not overdue
-        or told(lambda r: r["review_overdue"]),
+        or all(
+            any(checks.same_session(hand, row) for row, _ in messages) for hand in handoffs
+        ),
         "followup_pending_while_waiting": not waiting
         or any(
             row["status"] == "pending"
@@ -629,7 +641,7 @@ def business_outcome(case, run):
     record = _record(run)
     if record["decision"]:
         return "resolved"
-    if record["review_overdue"]:
+    if review_overdue(record, _case_time(case["horizon"])):
         return "timed_out"
     return "in_progress"
 

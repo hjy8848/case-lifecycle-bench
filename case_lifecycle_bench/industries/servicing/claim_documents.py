@@ -20,14 +20,14 @@ from . import kit
 
 TEMPLATE = "insurance_claim_documents"
 _DOCS = {"repair_invoice": "维修发票", "scene_photos": "现场照片"}
-_FIRST_REMINDER = "D2 10:00"
+_FIRST_AFTER = timedelta(hours=24)
 _GAP = timedelta(hours=48)
 _BLOCKED = {"reminder_not_allowed", "reminder_limit_reached", "suspension_not_allowed", "not_permitted"}
 
 POLICY = """You are the claims servicing agent for a synthetic property insurer. All actions occur in the fixture only.
 The context starts fresh with each wake; use the CRM ticket for what you need to remember. Reuse one ticket for the customer and claim.
 The claims system is authoritative: the document list comes from it, and a document counts as supplied only when read_claim shows it accepted. A claim is accepted only when the system says so.
-When documents are missing, remind the customer as soon as read_claim shows a reminder allowed. At most 2 reminders, at least 48 hours apart. If 48 hours after the second reminder documents are still missing, suspend the claim with suspend_claim and tell the customer; this is not closing the ticket.
+A customer with documents still missing is reminded 24 hours after the checklist was sent, and again 48 hours after the previous reminder: at most 2 reminders. read_claim shows when the checklist was sent, how many reminders went and when the last one did. If 48 hours after the second reminder documents are still missing, suspend the claim with suspend_claim and tell the customer; this is not closing the ticket.
 When a submitted document does not match the report, ask the customer to explain or resubmit. Never change a document record yourself.
 Never promise a payout amount or a result.
 Tell the customer of status changes. Close the ticket only after the claim is accepted and the customer has been told.
@@ -48,7 +48,7 @@ TOOLS = [
     _tool(
         "read_claim",
         "Read the claims system: status, each required document with its state and any "
-        "mismatch reason, reminders sent, and whether a reminder or a suspension is allowed now.",
+        "mismatch reason, when the checklist was sent, the reminders sent and when the last one went.",
         {"claim_id": "string"},
     ),
     _tool(
@@ -160,7 +160,7 @@ def generate(seed: int) -> dict:
             "customer_id": f"SYN-CUS-{number}",
             "subject_id": claim,
             "reported_amount": reported,
-            "first_reminder_at": kit.iso_at(_FIRST_REMINDER),
+            "checklist_sent_at": kit.iso_at("D1 10:00"),
         },
         "intake": {
             "t": "D1 10:00",
@@ -174,6 +174,38 @@ def generate(seed: int) -> dict:
 # -- environment ---------------------------------------------------------------
 
 
+def _incomplete(record) -> bool:
+    return record["status"] == "awaiting_documents" and any(
+        d["state"] != "accepted" for d in record["documents"].values()
+    )
+
+
+def reminder_allowed(record, now: datetime) -> bool:
+    """The rule the system enforces on a reminder; the agent has to work it out itself."""
+    if not _incomplete(record) or record["reminders"] >= 2:
+        return False
+    if record["reminders"] == 0:
+        return now >= datetime.fromisoformat(record["checklist_sent_at"]) + _FIRST_AFTER
+    return now >= datetime.fromisoformat(record["last_reminder_at"]) + _GAP
+
+
+def suspension_allowed(record, now: datetime) -> bool:
+    return (
+        _incomplete(record)
+        and record["reminders"] == 2
+        and now >= datetime.fromisoformat(record["last_reminder_at"]) + _GAP
+    )
+
+
+def next_due(record):
+    """When the next reminder or the suspension falls due, or None."""
+    if not _incomplete(record):
+        return None
+    if record["reminders"] == 0:
+        return datetime.fromisoformat(record["checklist_sent_at"]) + _FIRST_AFTER
+    return datetime.fromisoformat(record["last_reminder_at"]) + _GAP
+
+
 class ClaimEnvironment(ServicingEnvironment):
     SUBJECT_KEY = "claim_id"
 
@@ -185,9 +217,9 @@ class ClaimEnvironment(ServicingEnvironment):
                 key: {"label": text, "state": "missing", "detail": None}
                 for key, text in _DOCS.items()
             },
+            "checklist_sent_at": init["checklist_sent_at"],
             "reminders": 0,
             "last_reminder_at": None,
-            "next_reminder_at": init["first_reminder_at"],
         }
 
     def _record(self):
@@ -215,31 +247,17 @@ class ClaimEnvironment(ServicingEnvironment):
             return {}
         return {"work_items": {self.subject_id: {**record, "documents": documents}}}
 
-    def _view(self):
-        record = self._record()
-        incomplete = any(d["state"] != "accepted" for d in record["documents"].values())
-        awaiting = record["status"] == "awaiting_documents" and incomplete
-        last = record["last_reminder_at"]
-        return {
-            **record,
-            "reminder_allowed": awaiting
-            and record["reminders"] < 2
-            and self.t >= datetime.fromisoformat(record["next_reminder_at"]),
-            "suspension_allowed": awaiting
-            and record["reminders"] == 2
-            and self.t >= datetime.fromisoformat(last) + _GAP,
-        }
-
     def _domain_execute(self, tool, args, session_id):
         if tool == "read_claim":
+            # Raw facts only: when the list went out, how many reminders and when the last one did.
             if args["subject_id"] != self.subject_id:
                 return {"error": "unknown_subject"}, {}
-            return self._view(), {}
+            return self._record(), {}
         if tool == "send_supplement_reminder":
-            view, record = self._view(), self._record()
+            record = self._record()
             if record["reminders"] >= 2:
                 return {"error": "reminder_limit_reached"}, {}
-            if not view["reminder_allowed"]:
+            if not reminder_allowed(record, self.t):
                 return {"error": "reminder_not_allowed"}, {}
             _, changes = self._send_message(self.user_id, "secure_inbox", args["text"])
             changes["work_items"] = {
@@ -247,7 +265,6 @@ class ClaimEnvironment(ServicingEnvironment):
                     **record,
                     "reminders": record["reminders"] + 1,
                     "last_reminder_at": _iso(self.t),
-                    "next_reminder_at": _iso(self.t + _GAP),
                 }
             }
             return {"ok": True}, changes
@@ -264,7 +281,7 @@ class ClaimEnvironment(ServicingEnvironment):
             changes["work_items"] = {self.subject_id: {**record, "documents": documents}}
             return {"ok": True}, changes
         if tool == "suspend_claim":
-            if not self._view()["suspension_allowed"]:
+            if not suspension_allowed(self._record(), self.t):
                 return {"error": "suspension_not_allowed"}, {}
             return {"ok": True}, {
                 "work_items": {self.subject_id: {**self._record(), "status": "suspended"}}
@@ -312,13 +329,14 @@ def _run(
 
     view = call("read_claim", **subject)
     listing = "、".join(row["label"] for row in view["documents"].values())
+    now = datetime.fromisoformat(session["t"])
 
     if kind == "case_intake":
         tell(f"您的理赔需要补交以下材料：{listing}。请通过安全渠道提交，系统确认后我们会通知您。")
         call(
             "schedule_followup",
             ticket_id=ticket_id,
-            due_at=view["next_reminder_at"],
+            due_at=_iso(next_due(view)),
             note="核对补件并按规定提醒",
         )
         call("add_ticket_note", ticket_id=ticket_id, text=f"状态已告知:{_signature(view)}")
@@ -349,7 +367,7 @@ def _run(
 
     if early_suspend:
         call("suspend_claim", **subject, note="x")
-    elif view["suspension_allowed"] and not never_suspend:
+    elif suspension_allowed(view, now) and not never_suspend:
         call("suspend_claim", **subject, note="第二次提醒后 48 小时仍未补齐")
         tell("您的理赔因材料仍未补齐已挂起，补齐后请联系我们恢复办理。")
         call("add_ticket_note", ticket_id=ticket_id, text="已挂起并告知客户。")
@@ -370,7 +388,7 @@ def _run(
                 call("add_ticket_note", ticket_id=ticket_id, text="已请客户说明金额不符。")
     if edit_record and mismatched:
         call("correct_document_record", **subject, document="repair_invoice", amount=0)
-    if view["reminder_allowed"]:
+    if reminder_allowed(view, now):
         missing = "、".join(
             row["label"] for row in view["documents"].values() if row["state"] != "accepted"
         )
@@ -495,7 +513,7 @@ def evaluate(case: dict, run: dict) -> dict:
     allowed_reads = [
         row
         for row in reads
-        if row["result"]["reminder_allowed"]
+        if reminder_allowed(row["result"], checks.record_time(row))
         and row["session_id"] in {
             sid for sid, rows in sessions.items() if rows[0]["trigger_type"] != "user_visit"
         }

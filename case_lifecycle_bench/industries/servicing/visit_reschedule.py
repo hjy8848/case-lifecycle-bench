@@ -53,7 +53,7 @@ TOOLS = [
     _tool(
         "read_service_order",
         "Read the service order: the booked slot, its status, how many changes were made, "
-        "and the visit fee that applies to a change at this moment.",
+        "and the visit fee charged for a short-notice change.",
         {"service_order_id": "string"},
     ),
     _tool(
@@ -192,7 +192,6 @@ class RescheduleEnvironment(ChatContactMixin, ServicingEnvironment):
             "status": "booked",
             "appointment": {"slot": init["slot"], "confirmed": True},
             "changes_made": init["prior_changes"],
-            "fee_if_changed_now": 0,
             "fee_amount": init["fee"],
             "fee_consent": False,
         }
@@ -215,8 +214,7 @@ class RescheduleEnvironment(ChatContactMixin, ServicingEnvironment):
         if tool == "read_service_order":
             if args["subject_id"] != self.subject_id:
                 return {"error": "unknown_subject"}, {}
-            fee = record["fee_amount"] if self._fee_applies(record) else 0
-            return {**record, "fee_if_changed_now": fee}, {}
+            return record, {}
         if tool == "cancel_appointment":
             if not any(s.get("cancel_requested") for s in self.contact_scripts.values()):
                 return {"error": "cancel_not_requested"}, {}
@@ -326,8 +324,9 @@ def _run(session, call, *, choose_for_customer=False, skip_fee=False, cancel_ori
     chosen = offered.get("customer_choice")
     if choose_for_customer:
         chosen = next((s for s in offered["slots"] if s != chosen), offered["slots"][0])
-    if view["fee_if_changed_now"] and not skip_fee and chosen:
-        tell(f"距上门不足 24 小时改约要收 {view['fee_if_changed_now']} 元上门费，您是否同意？")
+    short_notice = _slot_start(view["appointment"]["slot"]) - datetime.fromisoformat(session["t"]) < timedelta(hours=24)
+    if short_notice and not skip_fee and chosen:
+        tell(f"距上门不足 24 小时改约要收 {view['fee_amount']} 元上门费，您是否同意？")
         call("record_fee_consent", contact_id=contact_id)
     if chosen:
         changed = call("reschedule_appointment", contact_id=contact_id, slot=chosen)

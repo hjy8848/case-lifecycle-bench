@@ -30,7 +30,7 @@ The context starts fresh with each wake; use the CRM ticket for what you need to
 The insurer portal is authoritative for the pre-authorisation result. Never promise that it will be approved.
 When it is rejected, tell the patient the reason the portal gives and the next step, and ask the doctor's office for the supplementary note with request_doctor_note. Resubmit when the note has arrived.
 Do not confirm the exam appointment before approval. A patient who insists on booking first is told the exam may be self-paid, and must agree explicitly; record it with record_self_pay_consent.
-If the re-review takes more than 3 calendar days (read_preauth shows since when and whether it is overdue), or the pre-authorisation is rejected a second time, hand the case to the billing advisor with escalate_to_human and tell the patient.
+If the re-review takes more than 3 calendar days (read_preauth shows when it was resubmitted), or the pre-authorisation is rejected a second time, hand the case to the billing advisor with escalate_to_human and tell the patient.
 Contact the patient on your own initiative only between 08:00 and 20:00, at most once in any 24 hours and only with their opt-in. Close the ticket only after approval, the exam is confirmed and the patient has been told.
 In a secure-chat visit the context carries the contact id of that chat. Use ISO virtual timestamps. The calendar starts Monday 2026-01-05. End each session when the current work is done."""
 
@@ -49,7 +49,7 @@ TOOLS = [
     _tool(
         "read_preauth",
         "Read the insurer portal: status, the rejection reason, rejection count, whether the "
-        "doctor's note has arrived, when it was resubmitted and whether the re-review is overdue.",
+        "doctor's note has arrived and when it was resubmitted.",
         {"preauth_id": "string"},
     ),
     _tool(
@@ -246,6 +246,14 @@ def generate(seed: int) -> dict:
 # -- environment ---------------------------------------------------------------
 
 
+def review_overdue(record, now: datetime) -> bool:
+    """The re-review has taken more than 3 calendar days. Worked out, never shown."""
+    return (
+        record["status"] == "resubmitted"
+        and now >= datetime.fromisoformat(record["resubmitted_at"]) + _REVIEW
+    )
+
+
 class PreauthEnvironment(medical.MedicalEnvironment):
     SUBJECT_KEY = "preauth_id"
     contact_tools = ("offer_exam_slots", "record_self_pay_consent", "book_exam")
@@ -284,20 +292,12 @@ class PreauthEnvironment(medical.MedicalEnvironment):
             return {}
         return {"work_items": {self.subject_id: new}}
 
-    def _view(self):
-        record = self._record()
-        overdue = (
-            record["status"] == "resubmitted"
-            and self.t >= datetime.fromisoformat(record["resubmitted_at"]) + _REVIEW
-        )
-        return {**record, "review_overdue": overdue}
-
     def _medical_execute(self, tool, args, session_id):
         record = self._record()
         if tool == "read_preauth":
             if args["subject_id"] != self.subject_id:
                 return {"error": "unknown_subject"}, {}
-            return self._view(), {}
+            return record, {}
         if tool == "request_doctor_note":
             if record["status"] != "rejected" or record["note_requested"]:
                 return {"error": "not_needed"}, {}
@@ -353,6 +353,7 @@ def _run(session, call, *, book_early=False, promise=False, skip_note=False, ski
     )
     visit = kind == "user_visit"
     view = call("read_preauth", **subject)
+    now = datetime.fromisoformat(session["t"])
 
     def tell(text, contact_id=None):
         if visit:
@@ -436,7 +437,7 @@ def _run(session, call, *, book_early=False, promise=False, skip_note=False, ski
         elif visit:
             call("say", text="预授权目前被拒，正在补充材料，未获批前不能确认检查预约。")
     elif view["status"] == "resubmitted":
-        if view["review_overdue"]:
+        if review_overdue(view, now):
             if "已转计费顾问" not in notes and not skip_escalation:
                 tell("预授权再审超过 3 天仍无结果，已转交计费顾问跟进，会通知您结果。")
                 call("escalate_to_human", ticket_id=ticket_id, note="再审超过 3 天，转计费顾问。")

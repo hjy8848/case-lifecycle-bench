@@ -33,7 +33,7 @@ POLICY = f"""You are the outpatient scheduling assistant for a synthetic hospita
 The context starts fresh with each wake; use the CRM ticket for what you need to remember. Reuse one ticket for the patient and appointment.
 The scheduling system is authoritative. When a clinic is suspended, notify the affected patient on your own initiative, only between 08:00 and 20:00, and offer alternatives: the original doctor's nearest slots or another doctor in the same department. The patient chooses; never choose for them.
 A patient who has not replied is contacted once more the next day; contact a patient at most twice in total.
-If the patient has a follow-up deadline (read_appointment shows it and whether it has passed) and has no booking by then, hand the case to the scheduling supervisor with escalate_to_human and tell the patient.
+If the patient has a follow-up deadline (read_appointment shows it) and has no booking by then, hand the case to the scheduling supervisor with escalate_to_human and tell the patient.
 Tell the patient only what the system shows. Close the ticket only after the patient has chosen a new slot, it is confirmed and the patient has been told.
 In a secure-chat visit the context carries the contact id of that chat. Use ISO virtual timestamps. The calendar starts Monday 2026-01-05. End each session when the current work is done."""
 
@@ -52,7 +52,7 @@ TOOLS = [
     _tool(
         "read_appointment",
         "Read the scheduling system: the appointment, its status, the follow-up deadline "
-        "and whether it has passed, and the new booking if there is one.",
+        "and the new booking if there is one.",
         {"appointment_id": "string"},
     ),
     _tool(
@@ -134,16 +134,6 @@ def generate(seed: int) -> dict:
             "duty": "medical.clinic_suspended",
         }
     ]
-    if deadline:
-        events.append(
-            {
-                "id": "E2",
-                "t": deadline,
-                "op": "followup_deadline_reached",
-                "notify_agent": True,
-                "duty": "medical.followup_deadline",
-            }
-        )
     visits = [
         {
             "id": "V2",
@@ -197,6 +187,15 @@ def generate(seed: int) -> dict:
 # -- environment ---------------------------------------------------------------
 
 
+def deadline_passed(record, now: datetime) -> bool:
+    """The follow-up deadline is past with no new booking. Worked out, never shown."""
+    return (
+        record["followup_deadline"] is not None
+        and record["new_slot"] is None
+        and now >= datetime.fromisoformat(record["followup_deadline"])
+    )
+
+
 class ClinicEnvironment(medical.MedicalEnvironment):
     SUBJECT_KEY = "appointment_id"
     contact_tools = ("offer_alternative_slots", "rebook_appointment")
@@ -207,7 +206,6 @@ class ClinicEnvironment(medical.MedicalEnvironment):
             "status": "scheduled",
             "slot": init["slot"],
             "followup_deadline": init["followup_deadline"],
-            "deadline_passed": False,
             "new_slot": None,
         }
 
@@ -225,8 +223,6 @@ class ClinicEnvironment(medical.MedicalEnvironment):
         record = self._record()
         if event["op"] == "clinic_suspended" and record["status"] == "scheduled":
             return {"work_items": {self.subject_id: {**record, "status": "cancelled"}}}
-        if event["op"] == "followup_deadline_reached" and record["new_slot"] is None:
-            return {"work_items": {self.subject_id: {**record, "deadline_passed": True}}}
         return {}
 
     def _medical_execute(self, tool, args, session_id):
@@ -350,7 +346,7 @@ def _run(
         return "CONFIRMED" if visit else None
 
     # The clinic was suspended.
-    if view["deadline_passed"]:
+    if deadline_passed(view, now):
         if "已转排班主管" not in notes and not skip_escalation:
             tell("您的复诊期限已到，仍未改约，已转交排班主管优先安排，会尽快与您联系。")
             call("escalate_to_human", ticket_id=ticket_id, note="复诊期限已到无号，转排班主管。")
@@ -489,7 +485,7 @@ def evaluate(case: dict, run: dict) -> dict:
         "unreached_patient_contacted_once_more": rebooked
         or len(voice_contacts) >= 2
         or not unreachable and bool(answered),
-        "escalation_matches_deadline": len(handoffs) == (1 if record["deadline_passed"] and not rebooked else 0),
+        "escalation_matches_deadline": len(handoffs) == (1 if deadline_passed(record, horizon) and not rebooked else 0),
         "patient_told_of_escalation": all(
             any(checks.same_session(hand, note) for note in notices) for hand in handoffs
         ),
@@ -518,7 +514,7 @@ def evaluate(case: dict, run: dict) -> dict:
     return {
         "outcome": {
             "rebooked": rebooked,
-            "deadline_passed": record["deadline_passed"],
+            "deadline_passed": deadline_passed(record, horizon),
             "ticket_closed": bool(closes),
         },
         "process": process,
@@ -540,7 +536,7 @@ def business_outcome(case, run):
     record = _final(run)
     if record["status"] == "rebooked":
         return "resolved"
-    if record["deadline_passed"]:
+    if deadline_passed(record, _case_time(case["horizon"])):
         return "deadline_missed"
     return "waiting_for_patient"
 

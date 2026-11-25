@@ -34,7 +34,7 @@ The context starts fresh with each wake; use the CRM ticket for what you need to
 The finance system is authoritative: a payout is paid only when read_payout shows it succeeded.
 Never pay the same claim twice. If the payout call times out, read_payout before anything else. Only a payment that failed can be paid again.
 Before a failed payout is paid again the receiving account must change: the customer's identity is verified, and the new account is in the insured's own name, or in a third party's name that a recorded authorisation letter names.
-If a payout stays processing for more than 3 calendar days (read_payout shows since when and whether it is overdue), escalate to finance with escalate_to_human and tell the customer.
+If a payout stays processing for more than 3 calendar days (read_payout shows when each payment started), escalate to finance with escalate_to_human and tell the customer.
 Tell the customer the result, and what is needed when a payment fails. Close the ticket only after the payout is paid and the customer has been told.
 In a secure-chat visit the context carries the contact id of that chat. Use ISO virtual timestamps. The calendar starts Monday 2026-01-05. End each session when the current work is done."""
 
@@ -53,7 +53,7 @@ TOOLS = [
     _tool(
         "read_payout",
         "Read the finance system: claim status, the payout account, every payment with "
-        "its state and start time, whether one is overdue, and any authorisation letter on file.",
+        "its state and start time, and any authorisation letter on file.",
         {"claim_id": "string"},
     ),
     _tool(
@@ -150,9 +150,9 @@ def generate(seed: int) -> dict:
             {
                 "id": "E1",
                 "t": stuck,
-                "op": "payment_overdue",
+                "op": "status_ping",
                 "notify_agent": True,
-                "duty": "insurance.payout_overdue",
+                "duty": "insurance.payout_status",
             }
         )
         revisit_event = "E1"
@@ -248,6 +248,15 @@ def generate(seed: int) -> dict:
 # -- environment ---------------------------------------------------------------
 
 
+def stuck_since(latest, now: datetime) -> bool:
+    """A payment still processing more than 3 calendar days after it started."""
+    return (
+        latest is not None
+        and latest["state"] == "processing"
+        and now >= datetime.fromisoformat(latest["started_at"]) + _STUCK
+    )
+
+
 class PayoutEnvironment(ChatContactMixin, ServicingEnvironment):
     SUBJECT_KEY = "claim_id"
     contact_tools = ("register_payout_account",)
@@ -260,7 +269,7 @@ class PayoutEnvironment(ChatContactMixin, ServicingEnvironment):
             "amount": init["amount"],
             "account": {"number": init["old_account"], "holder": init["insured_name"]},
             "payments": [],
-            "overdue": False,
+            "finance_last_checked_at": None,
             "letter": init.get("letter"),
         }
 
@@ -294,21 +303,15 @@ class PayoutEnvironment(ChatContactMixin, ServicingEnvironment):
         elif op == "payment_succeeded" and len(record["payments"]) > 1:
             payments = [*record["payments"][:-1], {**latest, "state": "succeeded"}]
             new = {**record, "status": "paid", "payments": payments}
-        elif op == "payment_overdue":
-            new = {**record, "overdue": True}
+        elif op == "status_ping":
+            new = {**record, "finance_last_checked_at": _iso(self.t)}
         else:
             return {}
         return {"work_items": {self.subject_id: new}}
 
     def _view(self):
-        record = self._record()
-        latest = record["payments"][-1] if record["payments"] else None
-        overdue = record["overdue"] or (
-            latest is not None
-            and latest["state"] == "processing"
-            and self.t >= datetime.fromisoformat(latest["started_at"]) + _STUCK
-        )
-        return {**record, "overdue": overdue}
+        # Raw facts only: every payment with its start time. Whether one has stuck is the agent's call.
+        return self._record()
 
     def _domain_execute(self, tool, args, session_id):
         record = self._record()
@@ -428,7 +431,7 @@ def _run(
         cancel_followups()
         call("close_ticket", ticket_id=ticket_id, resolution_code="paid")
         return "CONFIRMED" if visit else None
-    if view["overdue"] and latest and latest["state"] == "processing":
+    if stuck_since(latest, datetime.fromisoformat(session["t"])):
         if not skip_escalation and "已转财务" not in notes:
             tell("您的赔款支付处理超过 3 天仍无结果，已转交财务处理，我们会通知您结果。")
             call("escalate_to_human", ticket_id=ticket_id, note="赔款支付处理超过 3 天无结果，转财务。")
@@ -546,10 +549,7 @@ def evaluate(case: dict, run: dict) -> dict:
     ]
     paid = record["status"] == "paid"
     latest = record["payments"][-1] if record["payments"] else None
-    stuck = latest is not None and latest["state"] == "processing" and (
-        record["overdue"]
-        or horizon >= datetime.fromisoformat(latest["started_at"]) + _STUCK
-    )
+    stuck = stuck_since(latest, horizon)
 
     def told_after(read, upto=None):
         return any(
@@ -628,7 +628,7 @@ def business_outcome(case, run):
     if record["status"] == "paid":
         return "resolved"
     latest = record["payments"][-1] if record["payments"] else None
-    if latest is not None and latest["state"] == "processing" and record["overdue"]:
+    if stuck_since(latest, _case_time(case["horizon"])):
         return "stuck"
     return "in_progress"
 

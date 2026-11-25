@@ -54,7 +54,7 @@ class GenerationTest(unittest.TestCase):
         for case in cases("escalate"):
             self.assertEqual(
                 [(e["op"], _case_time(e["t"])) for e in case["events"]],
-                [("sla_exceeded", _case_time("D6 10:00"))],
+                [("status_ping", _case_time("D6 10:00"))],
             )
         for case in cases("wait"):
             reorder = next(e for e in case["events"] if e["id"] == "E2")

@@ -47,14 +47,11 @@ class GenerationTest(unittest.TestCase):
     def test_the_variants_follow_the_expiry_rule(self):
         horizon = _case_time("D6 18:00")
         for case in cases("escalate"):
-            lapse = next(e for e in case["events"] if e["op"] == "lapse_window")
-            self.assertEqual(
-                (datetime.fromisoformat(case["init"]["expires_at"]) - _case_time(lapse["t"])).total_seconds(),
-                24 * 3600,
-            )
-            self.assertLessEqual(_case_time(lapse["t"]), horizon)
-        for case in cases("wait") + cases("resolved"):
+            expiry = datetime.fromisoformat(case["init"]["expires_at"])
+            # Less than 24 hours remain at the deadline, and nothing in the world says so.
+            self.assertLess((expiry - horizon).total_seconds(), 24 * 3600)
             self.assertFalse([e for e in case["events"] if e["op"] == "lapse_window"])
+        for case in cases("wait") + cases("resolved"):
             self.assertGreaterEqual(
                 (datetime.fromisoformat(case["init"]["expires_at"]) - horizon).total_seconds(),
                 48 * 3600,
@@ -266,7 +263,7 @@ class ModelRunTest(unittest.TestCase):
             <= names
         )
         self.assertIn("09:00 and 18:00", i1.POLICY)
-        self.assertIn("24 hours of expiry", i1.POLICY)
+        self.assertIn("less than 24 hours", i1.POLICY)
         for case in map(i1.generate, SEEDS):
             for visit in case["visits"]:
                 self.assertTrue(visit["goal"] and visit["utterance"])
