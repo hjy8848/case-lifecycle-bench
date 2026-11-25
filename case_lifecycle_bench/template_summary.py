@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 
 from .evaluation import evaluate_case
-from .industries.service_cases import WORKFLOWS
+from .runnable_templates import ALL
 from .outcomes import INTERFACE_ERRORS, VARIANTS
 
 
@@ -26,7 +26,7 @@ def load(directory: Path):
 
 def rescore(record):
     meta = record["meta"]
-    case = WORKFLOWS[meta["template"]].generate(meta["seed"])
+    case = ALL[meta["template"]].generate(meta["seed"])
     if meta.get("customer_mode") == "llm":
         case["customer_mode"] = "llm"
     return evaluate_case(case, record["run"])

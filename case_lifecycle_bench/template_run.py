@@ -20,7 +20,7 @@ from urllib.parse import urlsplit
 from .environment import run_case
 from .eval_checks import benchmark_metrics
 from .evaluation import evaluate_case
-from .industries.service_cases import WORKFLOWS
+from .runnable_templates import ALL
 from .industries.servicing.kit import P7_SEEDS
 from .model_agent import ChatGateway, _customer_reply, model_agent
 from .outcomes import summarize_by_variant
@@ -29,7 +29,7 @@ from .outcomes import summarize_by_variant
 def run_one(
     name, seed, wake, model, user_model, base, output, *, enable_thinking, llm_customer=False
 ):
-    workflow = WORKFLOWS[name]
+    workflow = ALL[name]
     case = workflow.generate(seed)
     if llm_customer:
         # The simulator also voices outbound calls, and tool results stop carrying
@@ -151,7 +151,7 @@ def _failed_checks(records):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--template", choices=WORKFLOWS, required=True)
+    parser.add_argument("--template", choices=ALL, required=True)
     parser.add_argument("--start-seed", type=int, default=300)
     parser.add_argument(
         "--p7",
@@ -190,7 +190,12 @@ def main():
     user_model = args.user_model or args.model
     seeds = list(range(args.start_seed, args.start_seed + args.seeds))
     if args.p7:
-        seeds += [seed for seed in P7_SEEDS if seed not in seeds]
+        # Only templates that carry rule P7 have such instances.
+        seeds += [
+            seed
+            for seed in P7_SEEDS
+            if seed not in seeds and ALL[args.template].generate(seed).get("p7_visit")
+        ]
     jobs = [(seed, wake) for seed in seeds for wake in wakes]
     records, failures = [], []
     if args.workers_per_replica < 1:
