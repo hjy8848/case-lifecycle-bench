@@ -114,7 +114,6 @@ def generate(seed: int) -> dict:
                 "t": marked,
                 "op": "status_ping",
                 "notify_agent": True,
-                "duty": "credit.disbursement_status",
             }
         )
         revisit_t = kit.shift(marked, hours=12)

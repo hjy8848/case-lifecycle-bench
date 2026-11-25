@@ -49,3 +49,13 @@ def test_generic_ledger_tracks_observed_followup_without_extra_tool_calls():
     assert (
         captures[1]["commitments"][0]["text"] == "Commitment: check the part tomorrow"
     )
+
+
+import unittest  # noqa: E402
+
+
+class LedgerTest(unittest.TestCase):
+    """unittest discovery skips plain test functions, so run this one through a TestCase."""
+
+    def test_ledger(self):
+        test_generic_ledger_tracks_observed_followup_without_extra_tool_calls()

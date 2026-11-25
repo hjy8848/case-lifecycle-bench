@@ -161,12 +161,10 @@ def generate(seed: int) -> dict:
             reason=rng.choice(_DECLINE_REASONS) if decision == "declined" else None,
         )
     elif variant == "escalate":
-        event(
-            "E6",
-            _shift(completed, hours=72),
-            "review_ping",
-            "credit.escalate_supervisor",
-        )
+        # A status update that wakes a pushed agent. It carries no duty: the limit is a
+        # deadline the agent works out, not a change in the record to be detected.
+        event("E6", _shift(completed, hours=72), "review_ping")
+        events[-1]["notify_agent"] = True
     visits = [
         {
             "id": "V2",

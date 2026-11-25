@@ -39,7 +39,11 @@ class GenerationTest(unittest.TestCase):
         for case in map(h1.generate, SEEDS):
             with self.subTest(case=case["case_id"]):
                 self.assertTrue(case["events"])
-                self.assertTrue(all(e["notify_agent"] and e["duty"] for e in case["events"]))
+                # Every event wakes a pushed agent. The one that only marks a deadline has no duty.
+                self.assertTrue(all(e["notify_agent"] for e in case["events"]))
+                self.assertTrue(
+                    all(e.get("duty") or e["op"] == "status_ping" for e in case["events"])
+                )
                 self.assertTrue(any(v.get("condition") for v in case["visits"]))
                 self.assertTrue(any("condition" not in v for v in case["visits"]), "a pushy visit")
 

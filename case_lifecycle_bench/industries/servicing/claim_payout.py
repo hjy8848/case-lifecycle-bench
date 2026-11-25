@@ -152,7 +152,6 @@ def generate(seed: int) -> dict:
                 "t": stuck,
                 "op": "status_ping",
                 "notify_agent": True,
-                "duty": "insurance.payout_status",
             }
         )
         revisit_event = "E1"

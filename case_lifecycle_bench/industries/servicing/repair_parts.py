@@ -193,6 +193,9 @@ def generate(seed: int) -> dict:
         event("E2", "part_arrived", arrival, on=reorder_on, after=f"{delay}h", model_ok=True)
     else:
         event("E1", "status_ping", "repair.status_update", t="D6 10:00")
+        # A status update that wakes a pushed agent, with no duty: the 5-day limit is a
+        # deadline the agent works out, not a change in the record to be detected.
+        events[-1].pop("duty")
     visits = [
         {
             "id": "V2",

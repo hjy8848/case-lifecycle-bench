@@ -150,12 +150,36 @@ DUTY_READS = {
     },
     "shipments": {"get_shipment": ("shipment_id", "status")},
     "quotes": {"read_renewal_quote": ("policy_id", "status", "version")},
+    # A work-item read exposes an event when every field it shares with the changed record
+    # still has the value the event gave it. The tool names below are the authoritative
+    # reads of the card templates.
     "work_items": {
-        "read_application": ("subject_id", "status"),
+        "read_application": ("subject_id", "status", "documents_complete"),
         "read_installment": ("subject_id", "status", "broken_promises"),
-        "read_repair_order": ("subject_id", "status", "sla_exceeded", "reorder_count"),
+        "read_repair_order": ("subject_id", "status", "reorder_count"),
+        "read_policy": ("policy_id", "renewal_state", "accepted_quote_version"),
+        "read_renewal_quote": ("policy_id", "status", "version", "premium"),
+        "read_claim": ("claim_id", "status", "documents"),
+        "read_payout": ("claim_id", "status", "payments"),
+        "read_assessment": ("claim_id", "status", "assessment", "agreed_versions"),
+        "read_disbursement": ("loan_id", "status", "disbursements"),
+        "read_quote": ("application_id", "status", "quote", "agreed_versions"),
+        "read_service_order": (
+            "service_order_id", "status", "checkin_at", "completed", "missed_visits",
+            "photos_received", "customer_note", "appointment", "changes_made",
+        ),
+        "read_referral": ("referral_id", "status", "specialist_replied", "slots"),
+        "read_preauth": ("preauth_id", "status", "rejections", "note_received", "exam"),
+        "read_appointment": ("appointment_id", "status", "new_slot"),
+        "read_intake": ("visit_id", "status", "documents"),
     },
 }
+
+
+def _flat(record):
+    """A record with the fields of a nested quote lifted to the top, as its read returns them."""
+    quote = record.get("quote")
+    return {**record, **quote} if isinstance(quote, dict) and "quote_version" not in record else record
 
 
 def _exposes_event(query, changes, read_specs):
@@ -163,13 +187,18 @@ def _exposes_event(query, changes, read_specs):
     rows = result if isinstance(result, list) else [result]
     for table, tools in read_specs.items():
         fields = tools.get(query["tool"])
-        if fields and any(
-            isinstance(row, dict)
-            and all(field in row and row[field] == expected[field] for field in fields)
-            for row in rows
-            for expected in changes.get(table, {}).values()
-        ):
-            return True
+        if not fields:
+            continue
+        for expected in changes.get(table, {}).values():
+            expected = _flat(expected)
+            # The fields this tool is judged on that the changed record actually has.
+            shared = [field for field in fields if field in expected]
+            if shared and any(
+                isinstance(row, dict)
+                and all(field in row and row[field] == expected[field] for field in shared)
+                for row in rows
+            ):
+                return True
     return False
 
 
