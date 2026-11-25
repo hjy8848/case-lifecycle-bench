@@ -42,14 +42,14 @@ Send important changes and final results with send_message_to_user. Close a tick
 only after verifying the result, notifying the customer, and clearing pending
 follow-ups. {followup_deadline}
 Avoid promising dates of bank settlement. Use ISO virtual time without a time
-zone. {session_ending}For live chat, respond in Chinese.
+zone. {session_ending}For live chat, respond in English.
 """
 
 POLICY = _POLICY.format(
     session_setup="The context starts fresh with each wake.",
-    refund_check="After issuing or retrying\na refund, schedule a follow-up within 48h to verify the payment result.",
-    interception_check="If shipped, track the\ninterception within 24h and recheck within another 24h if pending.",
-    followup_deadline="Schedule any promised follow-ups no later than their deadlines.",
+    refund_check="Verify the payment result of a refund you issue or retry.",
+    interception_check="If shipped, track the interception until the carrier reports a result.",
+    followup_deadline="While the case is open and you are waiting on anything, leave one pending follow-up\nfor your next check before you end a session.",
     session_ending="During a follow-up or system wake there is no live user. End such sessions\nwith end_session once the current work is done. ",
 )
 

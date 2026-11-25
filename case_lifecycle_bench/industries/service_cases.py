@@ -36,7 +36,7 @@ def _with_p7(workflow):
     return replace(
         workflow,
         generate=kit.with_p7(workflow.generate),
-        policy=f"{workflow.policy}\n{kit.P7_RULE}",
+        policy=f"{workflow.policy}\n{kit.FOLLOWUP_RULE}\n{kit.P7_RULE}",
         tools=tools,
         agents=agents,
         outcomes=replace(workflow.outcomes, oracle=agents["oracle"]),

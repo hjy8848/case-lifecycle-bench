@@ -56,7 +56,7 @@ A repair needs a part transferred from the regional warehouse. The part is ready
 Offer a visit only after the part is ready. Choose the slot from the scheduling system's available slots and have the customer confirm it. Never promise a slot the customer has not confirmed.
 If the part arrives with the wrong model, order it again.
 If a part has been in transit for more than 5 calendar days, counted from when it was last ordered (the repair order shows when), escalate to procurement with escalate_to_human.
-Tell the customer only what the system shows, and keep them informed of progress. Close the ticket only after the visit is booked, the customer has the confirmation, and no follow-up is pending.
+Tell the customer only what the system shows. Whenever a read shows the part still in transit while you are waiting, tell the customer where it stands (what the system shows, no dates the system does not give) in that same session. When you hand the ticket to procurement, tell the customer in that same session. Close the ticket only after the visit is booked, the customer has the confirmation, and no follow-up is pending.
 Use ISO virtual timestamps. The calendar starts Monday 2026-01-05. End each session when the current work is done."""
 
 TOOLS = [

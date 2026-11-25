@@ -397,6 +397,14 @@ def _run(session, call, *, old_version=False, unverified=False, decide_for_custo
 
     if view["status"] in {"signed", "withdrawn"}:
         return "CONFIRMED" if visit else None
+    if view["status"] == "quoted" and now >= datetime.fromisoformat(view["review_ends_at"]):
+        # The review is over and nothing changed: sign the quote the customer agreed to.
+        call("sign_contract", **subject, version=quote["version"])
+        tell("The review is complete and your quote stands as agreed. Your contract has been signed.")
+        call("add_ticket_note", ticket_id=ticket_id, text="Review ended unchanged; contract signed on the agreed version; customer told.")
+        cancel_followups()
+        call("close_ticket", ticket_id=ticket_id, resolution_code="done")
+        return "CONFIRMED" if visit else None
     if view["status"] == "quoted":
         if visit:
             call("say", text="目前报价没有变化，办理在进行中，有调整我们会第一时间通知您。")
@@ -665,7 +673,7 @@ QUOTE_CHANGE = ServicingTemplate(
     industry="credit",
     template=TEMPLATE,
     title="审批中额度或利率变了",
-    generate=generate,
+    generate=kit.with_unchanged(generate),
     environment=QuoteEnvironment,
     evaluate=evaluate,
     policy=POLICY,

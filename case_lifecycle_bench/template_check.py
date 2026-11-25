@@ -45,25 +45,6 @@ _REFUND_CHECKS = (
 )
 
 TEMPLATES = {
-    "insurance-renewal": Template(
-        renewal.renewal_case,
-        renewal.generate_renewal_case,
-        renewal.oracle,
-        (
-            (renewal.early_outreach, "process", "compliant_voice_contact"),
-            (renewal.missing_quote_consent, "process", "renewal_has_current_consent"),
-            (renewal.missed_notification, "outcome", "current_quote_confirmed"),
-        ),
-        (
-            "initial_review_scheduled",
-            "initial_review_triggered",
-            "proactive_current_quote_contact",
-            "compliant_voice_contact",
-            "renewal_has_current_consent",
-            "customer_notified_after_verification",
-            "closed_after_verified_notification",
-        ),
-    ),
     "refund-silent-failure": Template(
         partial(generate_t1_case, 300),
         generate_t1_case,

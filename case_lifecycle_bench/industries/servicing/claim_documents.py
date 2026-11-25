@@ -29,7 +29,7 @@ The context starts fresh with each wake; use the CRM ticket for what you need to
 The claims system is authoritative: the document list comes from it, and a document counts as supplied only when read_claim shows it accepted. A claim is accepted only when the system says so.
 A customer with documents still missing is reminded 24 hours after the checklist was sent, and again 48 hours after the previous reminder: at most 2 reminders. read_claim shows when the checklist was sent, how many reminders went and when the last one did. If 48 hours after the second reminder documents are still missing, suspend the claim with suspend_claim and tell the customer; this is not closing the ticket.
 When a submitted document does not match the report, ask the customer to explain or resubmit. Never change a document record yourself.
-Never promise a payout amount or a result.
+Never promise a payout amount or a result. Whenever a read shows a submitted document that does not match, ask the customer about it in that same session; when you suspend the claim, tell the customer in that same session.
 Tell the customer of status changes. Close the ticket only after the claim is accepted and the customer has been told.
 Use ISO virtual timestamps. The calendar starts Monday 2026-01-05. End each session when the current work is done."""
 

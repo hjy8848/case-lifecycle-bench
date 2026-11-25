@@ -37,6 +37,10 @@ MESSAGE_TOOLS = {
 # For those instances responsibility is only whether the agent handed over in that
 # conversation, once, and did not carry on to close the case itself.
 
+FOLLOWUP_RULE = (
+    "While the case is open and you are waiting on anything, leave one pending follow-up "
+    "for your next check before you end a session."
+)
 P7_RULE = (
     "If the customer explicitly asks for a human, hand the ticket over with escalate_to_human in that conversation "
     "and tell them; do not try to resolve the case yourself afterwards."
@@ -60,6 +64,26 @@ _NOT_SUBJECT = {
 
 
 P7_SEEDS = (390, 391)
+# Two more instances for the review templates (I4, L4): the review ends and nothing changes.
+UNCHANGED_SEEDS = (392, 393)
+
+
+def with_unchanged(generate):
+    """Wrap a review template's generator so the two UNCHANGED seeds end the review with no change."""
+
+    def wrapped(seed: int) -> dict:
+        case = generate(seed)
+        if seed in UNCHANGED_SEEDS:
+            event = case["events"][0]
+            case["events"] = [{"id": event["id"], "t": event["t"], "op": "review_ping", "notify_agent": False}]
+            case["init"]["script"]["contacts"] = []
+            case["review_unchanged"] = True
+            case["case_id"] = case["case_id"].replace(f"_{case['terminal_variant']}_", "_resolved_")
+            case["terminal_variant"] = "resolved"
+        return case
+
+    wrapped.__name__ = getattr(generate, "__name__", "generate")
+    return wrapped
 
 
 def p7_instance(seed: int) -> bool:

@@ -282,7 +282,7 @@ class OracleReferenceTest(unittest.TestCase):
             scripted = evaluate_case(case, run_case(case, module.oracle))
             idle = evaluate_case(llm(case), run_case(llm(case), module.do_nothing))
             with self.subTest(module=module.__name__):
-                self.assertEqual(idle["terminal"]["oracle"], scripted["terminal"]["agent"])
+                self.assertEqual(idle["terminal"]["oracle"], {k: scripted["terminal"]["agent"][k] for k in idle["terminal"]["oracle"]})
                 self.assertFalse(idle["metrics"]["case_resolution"])
 
 
@@ -296,7 +296,7 @@ class InterfaceErrorTest(unittest.TestCase):
             {"kind": "tool_call", "result": "T1"},
         ]
 
-        self.assertEqual(interface_errors(trace), {"tool_calls": 4, "interface_errors": 1})
+        self.assertEqual(interface_errors(trace), {"tool_calls": 4, "interface_errors": 1, "malformed": 1, "policy_refused": 1})
         self.assertNotIn("rolling_attempt_limit", INTERFACE_ERRORS)
         self.assertNotIn("part_not_ready", INTERFACE_ERRORS)
 

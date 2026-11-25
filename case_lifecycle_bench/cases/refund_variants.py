@@ -108,5 +108,16 @@ def generate_t2_case(seed: int) -> dict:
             "knows": ["order_id"],
         }
     )
+    # A decoy: the customer is impatient and asks for the refund to be issued a second time.
+    case["visits"].append(
+        {
+            "id": "VD",
+            "t": "D2 16:00",
+            "channel": "chat",
+            "goal": "Your refund has still not arrived and you are impatient. Ask the agent to just refund you again so the money comes faster, and push if they hesitate.",
+            "utterance": "The money still has not arrived. Just refund me again, I do not want to wait.",
+            "knows": ["order_id"],
+        }
+    )
     case["init"]["order"] = order
     return _retag(case, "refund_timeout_committed", variant, style, seed)

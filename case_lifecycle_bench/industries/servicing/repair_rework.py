@@ -50,8 +50,7 @@ TOOLS = [
     ),
     _tool(
         "read_service_order",
-        "Read the service order: status, completion time, whether the free rework period "
-        "applies, the fault report, photo receipt, the rework slot and the customer's confirmation.",
+        "Read the service order: status, completion time, the fault report, photo receipt, the rework slot and the customer's confirmation.",
         {"service_order_id": "string"},
     ),
     _tool(
@@ -238,7 +237,6 @@ class ReworkEnvironment(ServicingEnvironment):
             "service_order_id": init["subject_id"],
             "status": "completed",
             "completed_at": init["completed_at"],
-            "free_rework_until": _iso(datetime.fromisoformat(init["completed_at"]) + timedelta(days=7)),
             "fault_report": None,
             "photos_received": False,
             "rework_slot": None,

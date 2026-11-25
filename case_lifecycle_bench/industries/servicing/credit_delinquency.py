@@ -221,7 +221,7 @@ def generate(seed: int) -> dict:
             "id": "V1",
             "t": "D4 12:00",
             "channel": "secure_chat",
-            "condition": {"no_message_after_event": "E3"},
+            "condition": {"no_message_after_event": "E3" if variant == "resolved" else "E1"},
             "utterance": revisit,
             "goal": "想知道还款和提醒的最新情况。",
         }

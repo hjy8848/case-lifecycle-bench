@@ -391,6 +391,15 @@ def _run(
 
     if view["status"] == "proceeding":
         return "CONFIRMED" if visit else None
+    if view["status"] == "assessed" and now >= datetime.fromisoformat(view["review_ends_at"]):
+        # The review is over and nothing changed: proceed on the version the customer agreed to.
+        amount = assessment["amount"]
+        call("proceed_with_assessment", **subject, version=assessment["version"], amount=amount)
+        tell(f"The review is complete and your assessment stands at {amount}. We are proceeding with your claim.")
+        call("add_ticket_note", ticket_id=ticket_id, text="Review ended unchanged; proceeding on the agreed version; customer told.")
+        cancel_followups()
+        call("close_ticket", ticket_id=ticket_id, resolution_code="confirmed")
+        return "CONFIRMED" if visit else None
     if view["status"] == "assessed":
         if visit:
             call("say", text="目前定损没有变化，办理在进行中，有调整我们会第一时间通知您。")
@@ -701,7 +710,7 @@ DAMAGE_REVISION = ServicingTemplate(
     industry="insurance",
     template=TEMPLATE,
     title="定损结果被改",
-    generate=generate,
+    generate=kit.with_unchanged(generate),
     environment=RevisionEnvironment,
     evaluate=evaluate,
     policy=POLICY,

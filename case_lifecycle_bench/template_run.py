@@ -1,4 +1,4 @@
-"""Run a model agent on generated instances of a card-based template.
+﻿"""Run a model agent on generated instances of a card-based template.
 
 The agent and the customer simulator are chat models on OpenAI-compatible replicas.
 Chat visits use the simulator; outbound contacts follow the instance's script.
@@ -21,7 +21,7 @@ from .environment import run_case
 from .eval_checks import benchmark_metrics
 from .evaluation import evaluate_case
 from .runnable_templates import ALL
-from .industries.servicing.kit import P7_SEEDS
+from .industries.servicing.kit import P7_SEEDS, UNCHANGED_SEEDS
 from .model_agent import ChatGateway, _customer_reply, model_agent
 from .outcomes import summarize_by_variant
 
@@ -193,8 +193,12 @@ def main():
         # Only templates that carry rule P7 have such instances.
         seeds += [
             seed
-            for seed in P7_SEEDS
-            if seed not in seeds and ALL[args.template].generate(seed).get("p7_visit")
+            for seed in (*P7_SEEDS, *UNCHANGED_SEEDS)
+            if seed not in seeds
+            and (
+                ALL[args.template].generate(seed).get("p7_visit")
+                or ALL[args.template].generate(seed).get("review_unchanged")
+            )
         ]
     jobs = [(seed, wake) for seed in seeds for wake in wakes]
     records, failures = [], []

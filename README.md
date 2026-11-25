@@ -50,7 +50,6 @@ python -m case_lifecycle_bench --case t3 --paired --agent premature-refund
 每个模板先定义时间线、业务事件和客户回访条件。生成器用固定种子产出 10 个实例，改变事件时点、客户反应及合成标识。验收入口要求 Oracle 在 Poll-only 和 Event-push 下逐条通过所有适用检查，并要求 2–3 个反例在两种模式下触发各自的评分项。真实模型轨迹用于检查模型是否实际走到关键业务步骤，并供人工判断难度。
 
 ```powershell
-python -m case_lifecycle_bench.template_check --template insurance-renewal --seed 300
 ```
 
 `--output` 可保存生成实例和评分证据。用 `--smoke-trace <轨迹.json>` 复算真实模型试跑，轨迹需带用例哈希、模型 ID 和调用次数。

@@ -1,6 +1,7 @@
-#!/usr/bin/env bash
-# Run every card template against the model replicas on this machine, Poll-only, once with
-# the scripted customer and once with the simulated one, plus the two P7 instances each.
+﻿#!/usr/bin/env bash
+# Run every card template against the model replicas on this machine, Poll-only, with the
+# simulated (LLM) customer, plus the P7 and unchanged-review instances. The scripted customer is a
+# control (MODES="llm script"): it puts the customer's intent into tool results.
 #
 #   PYTHON=/path/to/python3.12 PORTS="8101 8102 8103 8104" JOBS=8 WORKERS=1 TAG=20261125 \
 #       bash deploy/run_all_templates.sh
@@ -38,9 +39,9 @@ one() {  # one <template>:<mode>
     expected=$("$PYTHON" -c "
 import os
 from case_lifecycle_bench.runnable_templates import ALL
-from case_lifecycle_bench.industries.servicing.kit import P7_SEEDS
+from case_lifecycle_bench.industries.servicing.kit import P7_SEEDS, UNCHANGED_SEEDS
 generate = ALL['$template'].generate
-print(int(os.environ['SEEDS']) + sum(1 for s in P7_SEEDS if generate(s).get('p7_visit')))
+print(int(os.environ['SEEDS']) + sum(1 for s in (*P7_SEEDS, *UNCHANGED_SEEDS) if generate(s).get('p7_visit') or generate(s).get('review_unchanged')))
 ")
     for pass in 1 2; do
         "$PYTHON" -m case_lifecycle_bench.template_run \
@@ -59,6 +60,8 @@ export -f one
 echo "$(date -Is) start tag=$TAG jobs=$JOBS workers=$WORKERS model=$MODEL" >> "$OUT/progress.log"
 ONLY=${ONLY:-}   # optional: space-separated template names to run instead of all of them
 export ONLY
+MODES=${MODES:-llm}   # main experiment: simulated (LLM) customer only; MODES="llm script" adds the scripted control
+export MODES
 "$PYTHON" - <<'PY' | xargs -P "$JOBS" -I{} bash -c 'one {}'
 import os
 from case_lifecycle_bench.runnable_templates import ALL
@@ -66,7 +69,7 @@ only = os.environ.get("ONLY", "").split()
 for name in ALL:
     if only and name not in only:
         continue
-    for mode in ("script", "llm"):
+    for mode in os.environ.get("MODES", "llm").split():
         print(f"{name}:{mode}")
 PY
 echo "$(date -Is) all jobs finished" >> "$OUT/progress.log"
