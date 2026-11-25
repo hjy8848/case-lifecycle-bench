@@ -268,15 +268,42 @@ def _customer_reply(gateway, model, visit, dialogue):
     return reply
 
 
+def _numbered(call, wake):
+    """Label each tool call of one wake W<wake>.<n>, the same way the ledger wrapper does, so every
+    group sees one format. The label of the latest call is left on `last_ref`."""
+    count = {"n": 0}
+
+    def numbered(tool, **args):
+        count["n"] += 1
+        numbered.last_ref = f"W{wake}.{count['n']}"
+        return call(tool, **args)
+
+    numbered.numbered = True
+    numbered.last_ref = None
+    return numbered
+
+
 def model_agent(
-    gateway, model, user_model, case, *, user_gateway=None, policy=None, tools=TOOLS
+    gateway, model, user_model, case, *, user_gateway=None, policy=None, tools=TOOLS, ledger_tools=False
 ):
+    """`ledger_tools` is False (no ledger), True (the full Case Ledger) or a LedgerConfig."""
+    ledger_on = bool(ledger_tools)
+    ledger_config = None
+    if ledger_on:
+        from .case_ledger import LedgerConfig, ledger_tool_schemas
+
+        ledger_config = ledger_tools if isinstance(ledger_tools, LedgerConfig) else LedgerConfig.full()
+        tools = [*tools, *ledger_tool_schemas()]
     visits = {row["id"]: row for row in case["visits"]}
     tool_names = {item["function"]["name"] for item in tools}
+    wakes = {"n": 0}
     if user_gateway is None:
         user_gateway = gateway
 
     def agent(session, call):
+        wakes["n"] += 1
+        if not getattr(call, "numbered", False):
+            call = _numbered(call, wakes["n"])
         visit = (
             visits.get(session["trigger_id"])
             if user_model and session["trigger_type"] == "user_visit"
@@ -286,11 +313,27 @@ def model_agent(
         session_policy = policy or (
             SINGLE_SESSION_POLICY if session.get("single_session") else POLICY
         )
+        if ledger_on:
+            from .case_ledger import ledger_policy
+
+            session_policy = f"{session_policy}\n{ledger_policy(ledger_config)}"
         messages = [
             {"role": "system", "content": session_policy},
             {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
         ]
         dialogue = []
+
+        def stop_gate():
+            """With the ledger on, stopping goes through end_session so the books are checked.
+            Returns the rejection to show the model, or None when it may stop."""
+            if not ledger_on:
+                return None
+            outcome = call("end_session")
+            if isinstance(outcome, dict) and outcome.get("error"):
+                messages.append({"role": "user", "content": json.dumps(outcome, ensure_ascii=False)})
+                return outcome
+            return None
+
         if "message" in session:
             messages.append({"role": "user", "content": session["message"]})
             dialogue.append({"customer": session["message"]})
@@ -315,9 +358,11 @@ def model_agent(
                     args = json.loads(function["arguments"])
                     if name not in tool_names or not isinstance(args, dict):
                         raise ValueError
-                    if name == "end_session":
+                    if name == "end_session" and not ledger_on:
                         return "LEFT" if visit is not None else None
                     result = call(name, **args)
+                    if name == "end_session" and not (isinstance(result, dict) and result.get("error")):
+                        return "LEFT" if visit is not None else None
                 except (KeyError, TypeError, ValueError) as error:
                     agent.invalid_arguments += 1
                     # Kept for the result file: a malformed call and a bug behind a call look
@@ -326,16 +371,19 @@ def model_agent(
                         {"tool": name, "arguments": function.get("arguments"), "error": repr(error)[:200]}
                     )
                     result = {"error": "invalid_arguments"}
+                ref = getattr(call, "last_ref", None) if result != {"error": "invalid_arguments"} else None
                 messages.append(
                     {
                         "role": "tool",
                         "tool_call_id": tool_call["id"],
-                        "content": json.dumps(result, ensure_ascii=False),
+                        "content": (f"[ref {ref}] " if ref else "") + json.dumps(result, ensure_ascii=False),
                     }
                 )
             if pending:
                 continue
             if visit is None or not text.strip():
+                if stop_gate() is not None:
+                    continue
                 return None
             reply = _customer_reply(user_gateway, user_model, visit, dialogue)
             if reply.upper() in SIGNALS:

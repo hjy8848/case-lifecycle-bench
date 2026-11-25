@@ -26,9 +26,21 @@ from .model_agent import ChatGateway, _customer_reply, model_agent
 from .outcomes import summarize_by_variant
 
 
+GROUPS = ("E0", "E2", "E3", "A1", "A2")  # E1 (full history) and E4 (single session) have their own runners
+TEST_SEEDS = {*range(300, 310), 390, 391}
+
+
+def _ledger_config(group):
+    from .case_ledger import LedgerConfig
+
+    return {"E2": LedgerConfig.todo, "E3": LedgerConfig.full, "A1": LedgerConfig.no_keep, "A2": LedgerConfig.no_earn}[group]()
+
+
 def run_one(
-    name, seed, wake, model, user_model, base, output, *, enable_thinking, llm_customer=False
+    name, seed, wake, model, user_model, base, output, *, enable_thinking, llm_customer=False, group="E0"
 ):
+    if group != "E0" and seed in TEST_SEEDS and not os.environ.get("LEDGER_FROZEN"):
+        raise ValueError(f"Ledger group {group} may not run on test seed {seed} before the freeze")
     workflow = ALL[name]
     case = workflow.generate(seed)
     if llm_customer:
@@ -40,7 +52,7 @@ def run_one(
         "template": name,
         "seed": seed,
         "wake": wake,
-        "memory": "stateless_crm",
+        "memory": "stateless_crm" if group == "E0" else f"case_ledger_{group}",
         "agent_model": model,
         "user_model": user_model,
         "temperature": 0,
@@ -62,14 +74,24 @@ def run_one(
             raise ValueError(f"Existing result uses another configuration: {path.name}")
         return record
     gateway = ChatGateway(base, os.environ.get("CASE_LIFECYCLE_API_KEY"), enable_thinking=enable_thinking)
-    agent = model_agent(
-        gateway,
-        model,
-        user_model,
-        case,
-        policy=workflow.policy,
-        tools=workflow.tools,
-    )
+    book = None
+    if group == "E0":
+        agent = model_agent(gateway, model, user_model, case, policy=workflow.policy, tools=workflow.tools)
+    else:
+        from .case_ledger import PromiseBook
+
+        config = _ledger_config(group)
+        book = PromiseBook(
+            config,
+            policy=workflow.policy,
+            ask=lambda prompt: gateway.reply(model, [{"role": "user", "content": prompt}]).get("content"),
+            push=(wake == "push"),
+        )
+        inner = model_agent(
+            gateway, model, user_model, case, policy=workflow.policy, tools=workflow.tools, ledger_tools=config
+        )
+        agent = book.wrap(inner)
+        agent.invalid_arguments, agent.invalid_log = 0, []
     customer = None
     if llm_customer:
         # The simulator answers on outbound calls, with the same model and replica.
@@ -78,12 +100,13 @@ def run_one(
 
     run = run_case(case, agent, wake=wake, customer=customer)
     evaluation = evaluate_case(case, run)
+    counter = inner if book is not None else agent
     meta.update(
         model_calls=gateway.calls,
         model_retries=gateway.retries,
         api_base=base,
-        invalid_arguments=agent.invalid_arguments,
-        invalid_calls=agent.invalid_log,
+        invalid_arguments=counter.invalid_arguments,
+        invalid_calls=counter.invalid_log,
     )
     record = {
         "case_id": case["case_id"],
@@ -92,6 +115,8 @@ def run_one(
         "evaluation": evaluation,
         "run": run,
     }
+    if book is not None:
+        record["ledger"] = book.log()
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(record, ensure_ascii=False, indent=1), encoding="utf-8")
     tmp.replace(path)
@@ -165,6 +190,7 @@ def main():
     parser.add_argument("--api-bases", nargs="+", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--disable-thinking", action="store_true")
+    parser.add_argument("--group", choices=GROUPS, default="E0", help="memory group; E0 is the CRM-only baseline")
     parser.add_argument(
         "--workers-per-replica",
         type=int,
@@ -223,6 +249,7 @@ def main():
                 args.output,
                 enable_thinking=thinking,
                 llm_customer=args.llm_customer,
+                group=args.group,
             )
             futures[future] = (seed, wake)
         for future in as_completed(futures):
