@@ -83,6 +83,7 @@ def run_one(
         model_retries=gateway.retries,
         api_base=base,
         invalid_arguments=agent.invalid_arguments,
+        invalid_calls=agent.invalid_log,
     )
     record = {
         "case_id": case["case_id"],

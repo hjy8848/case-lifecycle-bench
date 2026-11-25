@@ -317,8 +317,13 @@ def model_agent(
                     if name == "end_session":
                         return "LEFT" if visit is not None else None
                     result = call(name, **args)
-                except (KeyError, TypeError, ValueError):
+                except (KeyError, TypeError, ValueError) as error:
                     agent.invalid_arguments += 1
+                    # Kept for the result file: a malformed call and a bug behind a call look
+                    # alike from outside, and the log is how they are told apart.
+                    agent.invalid_log.append(
+                        {"tool": name, "arguments": function.get("arguments"), "error": repr(error)[:200]}
+                    )
                     result = {"error": "invalid_arguments"}
                 messages.append(
                     {
@@ -342,4 +347,5 @@ def model_agent(
 
     # Malformed calls never reach the environment, so the agent counts them itself.
     agent.invalid_arguments = 0
+    agent.invalid_log = []
     return agent
