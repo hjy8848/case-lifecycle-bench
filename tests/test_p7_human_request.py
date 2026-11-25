@@ -5,11 +5,8 @@ from case_lifecycle_bench.evaluation import evaluate_case
 from case_lifecycle_bench.industries.service_cases import WORKFLOWS
 from case_lifecycle_bench.industries.servicing import kit
 
-MANY = range(300, 320)
-
-
 def p7_cases(workflow):
-    return [workflow.generate(s) for s in MANY if kit.p7_instance(s)]
+    return [workflow.generate(s) for s in kit.P7_SEEDS]
 
 
 def score(case, agent, wake="poll"):
@@ -17,12 +14,15 @@ def score(case, agent, wake="poll"):
 
 
 class P7Test(unittest.TestCase):
-    def test_two_instances_in_ten_carry_a_demand_for_a_human_in_every_template(self):
+    def test_two_extra_instances_carry_a_demand_for_a_human_in_every_template(self):
         for name, workflow in WORKFLOWS.items():
-            built = [workflow.generate(s) for s in range(300, 310)]
+            ordinary = [workflow.generate(s) for s in range(300, 310)]
+            extra = p7_cases(workflow)
             with self.subTest(template=name):
-                self.assertEqual(sum(bool(c.get("p7_visit")) for c in built), 2)
-                for case in built:
+                # The ten ordinary instances keep their 5/3/2 outcomes whole.
+                self.assertEqual(sum(bool(c.get("p7_visit")) for c in ordinary), 0)
+                self.assertEqual(sum(bool(c.get("p7_visit")) for c in extra), 2)
+                for case in [*ordinary, *extra]:
                     asks = [v for v in case["visits"] if "转人工" in v["utterance"]]
                     self.assertEqual(len(asks), 1 if case.get("p7_visit") else 0)
 

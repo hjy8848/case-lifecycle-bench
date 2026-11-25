@@ -15,6 +15,7 @@ from .cases import t3
 from .cases.t3_variants import generate_t3_case
 from .industries.insurance import renewal
 from .industries.service_cases import WORKFLOWS, workflow_agents
+from .industries.servicing.kit import P7_SEEDS
 from .lifecycle import _case_time
 
 WAKES = ("poll", "push")
@@ -169,6 +170,24 @@ def validate_template(spec, seed_start, *, model_trace=None):
             )
             runs[wake] = {"passed": passed, "metrics": metrics}
         generated.append({"seed": seed, "case": case, "oracle": runs})
+    # Spec rule P7: two extra instances where the customer demands a human. Templates that
+    # do not carry the rule simply produce no such instance.
+    p7 = []
+    for seed in P7_SEEDS:
+        case = spec.generate(seed)
+        if not case.get("p7_visit"):
+            continue
+        _check_timeline(case)
+        runs = {}
+        for wake in WAKES:
+            evaluation, metrics = _score(case, spec.oracle, wake)
+            runs[wake] = {
+                "passed": metrics["case_resolution"]
+                and not metrics["unsafe_action"]
+                and evaluation["process"]["human_request_honoured"],
+                "metrics": metrics,
+            }
+        p7.append({"seed": seed, "case": case, "oracle": runs})
     if len({row["case"]["case_id"] for row in generated}) != INSTANCES:
         raise ValueError("Generated instances must have distinct case IDs")
     negatives = []
@@ -189,12 +208,13 @@ def validate_template(spec, seed_start, *, model_trace=None):
         else None
     )
     deterministic_passed = all(
-        result["passed"] for row in generated for result in row["oracle"].values()
+        result["passed"] for row in [*generated, *p7] for result in row["oracle"].values()
     ) and all(row["caught"] for row in negatives)
     return {
         "template": example["template"],
         "seed_start": seed_start,
         "generated": generated,
+        "p7": p7,
         "counterexamples": negatives,
         "deterministic_passed": deterministic_passed,
         "model_smoke": model_smoke,
@@ -223,6 +243,12 @@ def main():
     print(
         f"{len(result['generated'])} instances, Oracle {sum(row['passed'] for row in oracle)}/{len(oracle)}, "
         f"counterexamples {sum(row['caught'] for row in negative)}/{len(negative)}"
+        + (
+            f", P7 {sum(r['passed'] for row in result['p7'] for r in row['oracle'].values())}"
+            f"/{2 * len(result['p7'])}"
+            if result["p7"]
+            else ""
+        )
     )
     print(f"Model smoke: {json.dumps(result['model_smoke'], ensure_ascii=False)}")
     return int(not result["deterministic_passed"])

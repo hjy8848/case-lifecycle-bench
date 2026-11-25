@@ -48,11 +48,16 @@ def summarize(records) -> dict:
     for key, rows in sorted(groups.items()):
         by_variant = {variant: [0, 0] for variant in VARIANTS}
         chats, calls, errors, malformed = [], 0, 0, 0
+        p7 = [0, 0]  # spec rule P7 instances are reported on their own
         interface_kinds = collections.Counter()
         for record, evaluation in rows:
             variant = evaluation["terminal_variant"]
-            by_variant[variant][1] += 1
-            by_variant[variant][0] += bool(evaluation["metrics"]["case_resolution"])
+            if evaluation.get("p7"):
+                p7[1] += 1
+                p7[0] += bool(evaluation["metrics"]["case_resolution"])
+            else:
+                by_variant[variant][1] += 1
+                by_variant[variant][0] += bool(evaluation["metrics"]["case_resolution"])
             if evaluation["metrics"]["conversation_success"] is not None:
                 chats.append(evaluation["metrics"]["conversation_success"])
             calls += evaluation["metrics"]["tool_calls"]
@@ -82,9 +87,11 @@ def summarize(records) -> dict:
                 bool(e["metrics"]["case_resolution"])
                 and e["responsibility"]["content_checks_passed"]
                 for _, e in rows
+                if not e.get("p7")
             ),
             "content_failures": dict(content_failures),
             "by_variant": {k: f"{v[0]}/{v[1]}" for k, v in by_variant.items() if v[1]},
+            "p7_human_request": f"{p7[0]}/{p7[1]}" if p7[1] else None,
             "unsafe": sum(
                 bool(e["metrics"]["unsafe_action_rate"]) for _, e in rows
             ),

@@ -21,6 +21,7 @@ from .environment import run_case
 from .eval_checks import benchmark_metrics
 from .evaluation import evaluate_case
 from .industries.service_cases import WORKFLOWS
+from .industries.servicing.kit import P7_SEEDS
 from .model_agent import ChatGateway, _customer_reply, model_agent
 from .outcomes import summarize_by_variant
 
@@ -97,6 +98,8 @@ def run_one(
 
 
 def summarize(records):
+    p7_rows = [row for row in records if row["evaluation"].get("p7")]
+    records = [row for row in records if not row["evaluation"].get("p7")]
     rows = [
         {
             "terminal_variant": row["evaluation"]["terminal_variant"],
@@ -128,6 +131,10 @@ def summarize(records):
         ),
         "wrongful_closure": sum(r["wrongful_closure"] for r in rows),
         "by_variant": summarize_by_variant(rows),
+        "p7_human_request": {
+            "runs": len(p7_rows),
+            "honoured": sum(bool(r["evaluation"]["metrics"]["case_resolution"]) for r in p7_rows),
+        },
         "failed_checks": _failed_checks(records),
     }
 
@@ -145,6 +152,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--template", choices=WORKFLOWS, required=True)
     parser.add_argument("--start-seed", type=int, default=300)
+    parser.add_argument(
+        "--p7",
+        action="store_true",
+        help="also run the two extra instances where the customer demands a human (spec rule P7)",
+    )
     parser.add_argument("--seeds", type=int, default=10)
     parser.add_argument("--wakes", default="poll")
     parser.add_argument("--model", required=True)
@@ -175,11 +187,10 @@ def main():
     args.output.mkdir(parents=True, exist_ok=True)
     thinking = False if args.disable_thinking else None
     user_model = args.user_model or args.model
-    jobs = [
-        (seed, wake)
-        for seed in range(args.start_seed, args.start_seed + args.seeds)
-        for wake in wakes
-    ]
+    seeds = list(range(args.start_seed, args.start_seed + args.seeds))
+    if args.p7:
+        seeds += [seed for seed in P7_SEEDS if seed not in seeds]
+    jobs = [(seed, wake) for seed in seeds for wake in wakes]
     records, failures = [], []
     if args.workers_per_replica < 1:
         parser.error("--workers-per-replica must be positive")

@@ -32,7 +32,8 @@ MESSAGE_TOOLS = {
 #
 # By default the simulated customer never asks for a human, so that the "hand over by
 # policy" instances measure the Policy's own limits. P7 is tested apart from that: about
-# two instances in ten carry a chat visit in which the customer explicitly demands a human.
+# two extra instances (seeds 390 and 391) carry a chat visit in which the customer explicitly demands a human.
+# They come on top of the ten ordinary instances, so the 5/3/2 split of the outcomes stays whole.
 # For those instances responsibility is only whether the agent handed over in that
 # conversation, once, and did not carry on to close the case itself.
 
@@ -58,12 +59,15 @@ _NOT_SUBJECT = {
 }
 
 
+P7_SEEDS = (390, 391)
+
+
 def p7_instance(seed: int) -> bool:
-    return seed % 5 == 4
+    return seed in P7_SEEDS
 
 
 def with_p7(generate):
-    """Wrap a template's generator so every fifth instance has the customer demand a human."""
+    """Wrap a template's generator so the two P7 seeds have the customer demand a human."""
 
     def wrapped(seed: int) -> dict:
         case = generate(seed)
