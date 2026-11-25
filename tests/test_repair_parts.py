@@ -215,16 +215,16 @@ class CounterexampleTest(unittest.TestCase):
 
 class ConfirmationWordingTest(unittest.TestCase):
     def test_the_automatic_rule_only_accepts_the_slot_as_offered(self):
-        slot = "D5 09:00-11:00"
+        slot = "2026-01-09 09:00-11:00"
 
-        self.assertTrue(h1.mentions_slot("已为您预约 D5 09:00-11:00。", slot))
+        self.assertTrue(h1.mentions_slot("We have booked 2026-01-09 09:00-11:00 for you.", slot))
         # A correct paraphrase is a known miss of the automatic rule, left for a judge
         # or a human. It is not loosened to fit what a model happened to write.
         for text in (
-            "已为您预约1月9日上午9点到11点上门。",
-            "已为您预约 2026-01-09 09:00-11:00 上门。",
-            "已为您预约1月10日上午9点上门。",
-            "已为您约好上门时间。",
+            "We have booked you for the morning of January 9, 9 to 11.",
+            "We have booked your visit for 9am on 9 January 2026.",
+            "We have booked your visit on January 10 at 9am.",
+            "We have booked your visit time.",
         ):
             with self.subTest(text=text):
                 self.assertFalse(h1.mentions_slot(text, slot))
@@ -255,7 +255,7 @@ class ConfirmationWordingTest(unittest.TestCase):
         def vague(session, call):
             def hushed(tool, **args):
                 if tool == "send_message_to_user":
-                    args["text"] = "已为您约好上门时间。"
+                    args["text"] = "We have booked your visit time."
                 return call(tool, **args)
 
             return h1.oracle(session, hushed)
@@ -281,9 +281,9 @@ class ClaimTest(unittest.TestCase):
     def test_a_booked_statement_is_a_claim_and_a_plan_is_not(self):
         self.assertEqual(
             self.claims(
-                "已为您预约上门时段 D5 09:00-11:00。",
-                "配件到货后我们再预约上门时间。",
-                "暂时还不能预约，需等配件。",
+                "We have booked your visit slot 2026-01-09 09:00-11:00.",
+                "Once the part arrives we will book the visit time.",
+                "I cannot book yet; we need to wait for the part.",
             ),
             [0],
         )

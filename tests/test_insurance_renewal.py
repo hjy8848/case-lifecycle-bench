@@ -187,7 +187,7 @@ class SimulatedCustomerTest(unittest.TestCase):
 
         def customer(visit, dialogue):
             asked.append((visit["goal"], dialogue[-1]))
-            return "我同意按这个版本续保。"
+            return "I agree to renew on this version."
 
         seen = {}
 
@@ -212,7 +212,7 @@ class SimulatedCustomerTest(unittest.TestCase):
 
     def test_a_simulated_caller_answers_a_presented_quote_in_the_result_not_as_a_hidden_flag(self):
         case = {**cases("resolved")[0], "customer_mode": "llm"}
-        env = i1.RenewalEnvironment(case, "poll", customer=lambda visit, dialogue: "好的，同意。")
+        env = i1.RenewalEnvironment(case, "poll", customer=lambda visit, dialogue: "OK, I agree.")
         record = env.state["work_items"][env.subject_id]
         env.state["work_items"][env.subject_id] = {
             **record,
@@ -220,7 +220,7 @@ class SimulatedCustomerTest(unittest.TestCase):
         }
         persona = case["init"]["script"]["contacts"][0]
         env.contact_scripts["C1"] = persona
-        env.dialogues["C1"] = [{"customer": "你好"}]
+        env.dialogues["C1"] = [{"customer": "Hello"}]
         contact = {
             "contact_id": "C1",
             "customer_id": env.user_id,
@@ -230,7 +230,7 @@ class SimulatedCustomerTest(unittest.TestCase):
 
         result = env._contact_tool("present_renewal_quote", contact, {"quote_version": "Q2"})[0]
 
-        self.assertEqual(result["customer_says"], "好的，同意。")
+        self.assertEqual(result["customer_says"], "OK, I agree.")
         self.assertNotIn("customer_accepts", result)
 
 
@@ -244,7 +244,7 @@ class ClaimTest(unittest.TestCase):
         return [row["seq"] for row in completion_claims(rows, i1._RENEWED)]
 
     def test_done_statements_are_claims_and_waiting_statements_are_not(self):
-        self.assertEqual(self.kinds("您的续保已成功。", "续保尚未确认，确认后我们会通知您。"), [0])
+        self.assertEqual(self.kinds("Your renewal was successful.", "The renewal is not confirmed yet; we will tell you once it is confirmed."), [0])
 
 
 class ModelRunTest(unittest.TestCase):

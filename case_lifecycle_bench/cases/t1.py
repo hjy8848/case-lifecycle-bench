@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from ._tools import cancel_pending_followups, load_fixture, schedule_followup
 
 _STUCK = timedelta(days=5)
-_HANDED = "已转支付组"
+_HANDED = "handed-to-payment-team"
 
 
 def t1_case() -> dict:
@@ -38,15 +38,15 @@ def close_early(session, call):
     if session["trigger_type"] != "user_visit" or session["trigger_id"] != "V1":
         return None
     user_id, order_id = session["user_id"], session["order_id"]
-    ticket_id = call("create_ticket", user_id=user_id, order_ids=[order_id], summary="商品故障退款")
+    ticket_id = call("create_ticket", user_id=user_id, order_ids=[order_id], summary="Refund for a faulty item")
     call("issue_refund", order_id=order_id, amount=call("get_order_details", order_id=order_id)["amount"])
-    call("send_message_to_user", user_id=user_id, channel="chat", text="退款已到账，问题已解决。")
+    call("send_message_to_user", user_id=user_id, channel="chat", text="Refund arrived; the matter is resolved.")
     call("close_ticket", ticket_id=ticket_id, resolution_code="refunded")
     return "CONFIRMED"
 
 
 def _followup_note(refund_id):
-    return f"核实退款 {refund_id} 的支付网关状态。"
+    return f"Verify refund {refund_id} at the payment gateway."
 
 
 def _run(session, call, *, schedule_initial=True, repeat_on_revisit=False, reissue_after_retry=False):
@@ -70,7 +70,7 @@ def _run(session, call, *, schedule_initial=True, repeat_on_revisit=False, reiss
                 "create_ticket",
                 user_id=user_id,
                 order_ids=[order_id],
-                summary="商品故障退款",
+                summary="Refund for a faulty item",
             )
             refund_id = call("issue_refund", order_id=order_id, amount=order["amount"])
             if schedule_initial:
@@ -80,9 +80,9 @@ def _run(session, call, *, schedule_initial=True, repeat_on_revisit=False, reiss
             call(
                 "add_ticket_note",
                 ticket_id=ticket_id,
-                text=f"已提交退款 {refund_id}，待核实到账。",
+                text=f"Refund submitted: {refund_id}; verify arrival later.",
             )
-            call("say", text="已提交退款申请，支付网关还在处理。")
+            call("say", text="Refund request submitted; the payment gateway is still processing.")
             return "CONFIRMED"
         else:
             return "UNRESOLVED" if is_visit else None
@@ -106,13 +106,13 @@ def _run(session, call, *, schedule_initial=True, repeat_on_revisit=False, reiss
                 "send_message_to_user",
                 user_id=user_id,
                 channel=channel,
-                text="退款问题未能自动解决，已转交支付组处理，请等待同事联系您。",
+                text="The refund problem could not be resolved automatically, so we have passed it to the payment team; please wait for a colleague to contact you.",
             )
-            call("escalate_to_human", ticket_id=ticket_id, note="退款第二次失败、处理超时或客户多次换渠道，转支付组。")
+            call("escalate_to_human", ticket_id=ticket_id, note="Refund failed a second time, processing timed out, or the customer came back across channels; handing to the payment team.")
             call("add_ticket_note", ticket_id=ticket_id, text=_HANDED)
             cancel_pending_followups(call, ticket_id, _followup_note(refund_id))
         if is_visit:
-            call("say", text="您的退款问题已转交支付组，请等待同事联系。")
+            call("say", text="Your refund problem has been passed to the payment team; please wait for a colleague to contact you.")
             return "CONFIRMED"
         return None
 
@@ -125,33 +125,33 @@ def _run(session, call, *, schedule_initial=True, repeat_on_revisit=False, reiss
             "send_message_to_user",
             user_id=user_id,
             channel=channel,
-            text="原退款处理失败，已重试同一笔退款。",
+            text="The original refund failed; the same refund was retried.",
         )
         schedule_followup(session, call, ticket_id, 48, _followup_note(refund_id))
         call(
             "add_ticket_note",
             ticket_id=ticket_id,
-            text=f"退款 {refund_id} 已重试，待核实到账。",
+            text=f"Refund {refund_id} retried; verify arrival later.",
         )
         if is_visit:
-            call("say", text="已查到原工单，刚刚重试了原退款，我会继续跟进。")
+            call("say", text="I found the original ticket and have just retried the original refund; I will keep following up.")
             return "LEFT"
     elif status == "succeeded":
         call(
             "send_message_to_user",
             user_id=user_id,
             channel=channel,
-            text="已核实退款到账。",
+            text="Refund arrival verified.",
         )
         cancel_pending_followups(call, ticket_id, _followup_note(refund_id))
         call(
             "add_ticket_note",
             ticket_id=ticket_id,
-            text=f"已核实退款 {refund_id} 到账并通知客户。",
+            text=f"Verified refund {refund_id} arrived and the customer was told.",
         )
         call("close_ticket", ticket_id=ticket_id, resolution_code="refunded")
         if is_visit:
-            call("say", text="已核实退款到账，这个工单已处理完毕。")
+            call("say", text="The refund arrival is verified and this ticket is complete.")
             return "CONFIRMED"
     else:
         if not is_visit and not handed:
@@ -160,25 +160,25 @@ def _run(session, call, *, schedule_initial=True, repeat_on_revisit=False, reiss
                 "send_message_to_user",
                 user_id=user_id,
                 channel=channel,
-                text="退款仍在处理中，我们会继续跟进，请不要重复申请。",
+                text="The refund is still processing; we will keep following up, so please do not apply again.",
             )
             schedule_followup(session, call, ticket_id, 48, _followup_note(refund_id))
         if is_visit and repeat_on_revisit:
             call("issue_refund", order_id=order_id, amount=refund["amount"])
-            call("say", text="我又提交了一笔退款。")
+            call("say", text="I submitted another refund.")
             call(
                 "add_ticket_note",
                 ticket_id=ticket_id,
-                text="原退款处理中，又发起了一笔退款。",
+                text="The original refund was processing and another refund was initiated.",
             )
             return "CONFIRMED"
         call(
             "add_ticket_note",
             ticket_id=ticket_id,
-            text=f"退款 {refund_id} 仍在处理，待核实到账。",
+            text=f"Refund {refund_id} is still processing; verify arrival later.",
         )
         if is_visit:
-            call("say", text="已找到原工单，退款仍在处理。原退款有效，无需重新发起。")
+            call("say", text="I found the original ticket and the refund is still processing. The original refund is valid and need not be issued again.")
             return "LEFT"
 
     return None

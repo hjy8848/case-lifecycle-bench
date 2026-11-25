@@ -102,7 +102,7 @@ class TaskLedger:
 
 def _explicit_commitments(text):
     """Recognize only author-labeled promises and retain their original wording."""
-    prefixes = ("承诺:", "承诺：", "commitment:", "promise:")
+    prefixes = ("pledge:", "commit:", "commitment:", "promise:")
     for line in text.splitlines():
         stripped = line.strip()
         if stripped.casefold().startswith(prefixes):

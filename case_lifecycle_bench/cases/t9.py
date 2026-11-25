@@ -14,8 +14,8 @@ def t9_case() -> dict:
     case["visits"][1].update(
         t="D3 15:00",
         channel="email",
-        goal="查询之前申请的退款进度，不主动提供订单号或工单号。",
-        utterance="之前申请的退款还没到账，请帮我查一下进度。",
+        goal="Ask about the progress of a refund you applied for earlier; you do not volunteer an order number or ticket number.",
+        utterance="The refund I applied for earlier has not arrived. Please check its progress for me.",
     )
     checks = ["reused_original_ticket(V2)", "no_duplicate_ticket(V2)"]
     case["checks"]["process"].extend(checks)
@@ -34,10 +34,10 @@ def duplicate_ticket(session, call):
         "create_ticket",
         user_id=user_id,
         order_ids=original["order_ids"],
-        summary="退款进度咨询",
+        summary="Refund progress inquiry",
     )
     call(
-        "add_ticket_note", ticket_id=ticket_id, text="客户通过邮件咨询之前申请的退款。"
+        "add_ticket_note", ticket_id=ticket_id, text="The customer asked by email about a refund applied for earlier."
     )
-    call("say", text="我已为您的退款进度咨询另建一个工单。")
+    call("say", text="I have opened a separate ticket for your refund progress inquiry.")
     return "LEFT"

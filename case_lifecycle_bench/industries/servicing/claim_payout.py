@@ -89,11 +89,11 @@ TOOLS = [
 ]
 
 _ARRIVED = {
-    "paid": r"已(?:经)?到账|已(?:经)?(?:成功)?支付|已(?:经)?打款|赔款已发放|款项已付",
+    "paid": r"(?i)has (?:been )?(?:arrived|paid|sent|credited)|(?:was|been) (?:paid|credited|sent)|payout (?:has been )?(?:paid|issued|sent)|funds (?:have )?arrived|payment (?:has been )?(?:made|sent)",
 }
 
-_NAMES = ("陈明", "王芳", "李强", "张伟", "刘洋", "赵敏", "周杰", "孙丽")
-_SHOPS = ("恒通汽车修理厂", "安达钣金喷漆店", "顺风汽修中心")
+_NAMES = ("Michael Chen", "Fiona Wang", "Daniel Li", "Wayne Zhang", "Ethan Liu", "Mia Zhao", "Jason Zhou", "Linda Sun")
+_SHOPS = ("Hengtong Auto Repair", "Anda Body and Paint", "Shunfeng Auto Service")
 
 
 # -- generation --------------------------------------------------------------
@@ -102,18 +102,18 @@ _SHOPS = ("恒通汽车修理厂", "安达钣金喷漆店", "顺风汽修中心"
 def _persona(name: str, account: str, holder: str, third: bool, letter: bool) -> str:
     if third:
         return (
-            f"你是保险理赔客户{name}，赔款没到账，你的收款账户已经注销。你想让保险公司把赔款直接付给修理厂，"
-            f"收款户名「{holder}」，账号 {account}。"
+            f"You are an insurance claimant named {name}. The payout did not arrive and your receiving account has been closed. You want the insurer to pay the repair shop directly, "
+            f"account holder '{holder}', account number {account}."
             + (
-                "你已经把授权书交给保险公司了。"
+                " You have already given the insurer the authorization letter."
                 if letter
-                else "你还没有提交授权书，被告知需要授权书后你说会回头再补。"
+                else " You have not submitted the authorization letter; when told one is needed, you say you will provide it later."
             )
-            + "核验身份时你配合。"
+            + " You cooperate when they verify your identity."
         )
     return (
-        f"你是保险理赔客户{name}，赔款没到账，你的收款账户已经注销。你要换成你本人名下的新账户，"
-        f"户名「{holder}」，账号 {account}。核验身份时你配合，对方办完后你可以结束对话。"
+        f"You are an insurance claimant named {name}. The payout did not arrive and your receiving account has been closed. You want to switch to a new account in your own name, "
+        f"account holder '{holder}', account number {account}. You cooperate when they verify your identity, and may end the conversation once they are done."
     )
 
 
@@ -161,8 +161,8 @@ def generate(seed: int) -> dict:
                 "id": "V2",
                 "t": "D2 15:00",
                 "channel": "secure_chat",
-                "utterance": rng.choice(("赔款一直没到，你们再给我打一次吧！", "钱呢？是不是打丢了，再打一笔给我。")),
-                "goal": "赔款一直没到账，催保险公司再打一次钱。" + kit.NO_HUMAN_REQUEST,
+                "utterance": rng.choice(("The payout never arrived, just send it again!", "Where is my money? Did it get lost? Send me another payment.")),
+                "goal": "The payout never arrived; you press the insurer to send the money again." + kit.NO_HUMAN_REQUEST,
                 "script": {},
             }
         )
@@ -185,7 +185,7 @@ def generate(seed: int) -> dict:
                 "t": "D2 15:00",
                 "channel": "secure_chat",
                 "utterance": rng.choice(
-                    ("赔款一直没到，我的卡已经注销了，能换个账户吗？", "我之前那张卡销户了，赔款怎么办？")
+                    ("The payout never arrived and my card was closed. Can I switch to another account?", "My old card was closed. What happens to the payout?")
                 ),
                 "goal": _persona(insured, account, holder, third, letter_ok) + kit.NO_HUMAN_REQUEST,
                 "script": {
@@ -210,8 +210,8 @@ def generate(seed: int) -> dict:
             "t": revisit_t,
             "channel": "secure_chat",
             "condition": {"no_message_after_event": revisit_event},
-            "utterance": "我的赔款怎么样了？一直没人通知我。",
-            "goal": "赔款状态一直没人通知，来问现在是什么情况。" + kit.NO_HUMAN_REQUEST,
+            "utterance": "What happened to my payout? Nobody has told me anything.",
+            "goal": "No one has told you the payout status, and you ask what is going on." + kit.NO_HUMAN_REQUEST,
             "script": {},
         }
     )
@@ -234,7 +234,7 @@ def generate(seed: int) -> dict:
         },
         "intake": {
             "t": "D1 10:00",
-            "note": "客户的财产险理赔已核准，请发起赔款支付并跟进到到账。",
+            "note": "The customer's property insurance claim is approved; initiate the payout and follow up until it arrives.",
         },
         "events": events,
         "visits": visits,
@@ -297,7 +297,7 @@ class PayoutEnvironment(ChatContactMixin, ServicingEnvironment):
             return {}
         op = event["op"]
         if op == "payment_failed":
-            payments = [*record["payments"][:-1], {**latest, "state": "failed", "reason": "收款账户已注销"}]
+            payments = [*record["payments"][:-1], {**latest, "state": "failed", "reason": "Receiving account has been closed"}]
             new = {**record, "status": "payout_failed", "payments": payments}
         elif op == "payment_succeeded" and len(record["payments"]) > 1:
             payments = [*record["payments"][:-1], {**latest, "state": "succeeded"}]
@@ -382,7 +382,7 @@ def _run(
     ticket_id = (
         tickets[0]["ticket_id"]
         if tickets
-        else call("create_ticket", user_id=user_id, summary="理赔赔款支付跟进", **subject)
+        else call("create_ticket", user_id=user_id, summary="Claim payout follow-up", **subject)
     )
     visit = kind == "user_visit"
 
@@ -405,7 +405,7 @@ def _run(
             if task["status"] == "pending" and task["due_at"] >= due
         ]
         if not pending:
-            call("schedule_followup", ticket_id=ticket_id, due_at=due, note="核实赔款支付状态")
+            call("schedule_followup", ticket_id=ticket_id, due_at=due, note="Check the payout status")
 
     if kind == "case_intake":
         paid = call("pay_claim", **subject)
@@ -413,7 +413,7 @@ def _run(
         if resend:
             # Pay again without trusting the first call, which is how a duplicate happens.
             call("pay_claim", **subject)
-        call("add_ticket_note", ticket_id=ticket_id, text="已发起赔款支付，待核实到账。")
+        call("add_ticket_note", ticket_id=ticket_id, text="Payout initiated; verify arrival later.")
         schedule_daily()
         return None
 
@@ -425,19 +425,19 @@ def _run(
     latest = view["payments"][-1] if view["payments"] else None
 
     if view["status"] == "paid":
-        tell("已核实赔款到账，感谢您的配合。")
-        call("add_ticket_note", ticket_id=ticket_id, text="赔款已到账，已通知客户。")
+        tell("We have verified that the payout arrived. Thank you for your cooperation.")
+        call("add_ticket_note", ticket_id=ticket_id, text="Payout arrived; customer told.")
         cancel_followups()
         call("close_ticket", ticket_id=ticket_id, resolution_code="paid")
         return "CONFIRMED" if visit else None
     if stuck_since(latest, datetime.fromisoformat(session["t"])):
-        if not skip_escalation and "已转财务" not in notes:
-            tell("您的赔款支付处理超过 3 天仍无结果，已转交财务处理，我们会通知您结果。")
-            call("escalate_to_human", ticket_id=ticket_id, note="赔款支付处理超过 3 天无结果，转财务。")
-            call("add_ticket_note", ticket_id=ticket_id, text="已转财务并通知客户。")
+        if not skip_escalation and "handed-to-finance" not in notes:
+            tell("Your payout has had no result after more than 3 days, so we have passed it to finance and will tell you the result.")
+            call("escalate_to_human", ticket_id=ticket_id, note="Payout unresolved after 3 days; handing to finance.")
+            call("add_ticket_note", ticket_id=ticket_id, text="handed-to-finance and customer told.")
             cancel_followups()
         elif visit:
-            call("say", text="赔款仍在财务处理中，结果出来后我们会通知您。")
+            call("say", text="The payout is still with finance; we will notify you once there is a result.")
         return "CONFIRMED" if visit else None
     if latest and latest["state"] == "failed":
         if visit and session.get("contact_id"):
@@ -451,8 +451,8 @@ def _run(
                 letter.get("state") == "on_file" and letter.get("payee_name") == offers.get("holder_name")
             )
             if offers.get("account_number") and not authorised:
-                tell("向第三方付款需要系统里有授权书，目前没有，请先补交授权书，补齐后我们再办理。")
-                call("add_ticket_note", ticket_id=ticket_id, text="第三方收款缺授权书，已告知客户。")
+                tell("Paying a third party needs an authorization letter in the system and there is none yet; please submit one first and we will proceed once it is in.")
+                call("add_ticket_note", ticket_id=ticket_id, text="Third-party payee lacks an authorization letter; customer told.")
             elif offers.get("account_number"):
                 registered = call(
                     "register_payout_account",
@@ -462,24 +462,24 @@ def _run(
                 )
                 if registered.get("ok"):
                     call("retry_payout", **subject)
-                    tell("已为您更换收款账户并重新提交赔款支付，到账后我们会通知您。")
-                    call("add_ticket_note", ticket_id=ticket_id, text="已核验身份、更换账户并重付。")
+                    tell("We have switched your receiving account and resubmitted the payout; we will notify you once it arrives.")
+                    call("add_ticket_note", ticket_id=ticket_id, text="Identity verified, account changed and payout resubmitted.")
                 else:
-                    tell("目前无法办理：向第三方付款需要系统里有授权书，请先补交授权书。")
-                    call("add_ticket_note", ticket_id=ticket_id, text="第三方收款缺授权书，已告知客户。")
+                    tell("I cannot proceed for now: paying a third party needs an authorization letter in the system; please submit one first.")
+                    call("add_ticket_note", ticket_id=ticket_id, text="Third-party payee lacks an authorization letter; customer told.")
             else:
-                tell("赔款因原收款账户已注销支付失败，请提供您本人名下的新账户，或第三方收款的授权书。")
-        elif "已告知失败" not in notes:
-            tell("赔款因原收款账户已注销支付失败，请联系我们提供您本人名下的新账户，或第三方收款的授权书。")
-            call("add_ticket_note", ticket_id=ticket_id, text="已告知失败及所需材料。")
+                tell("The payout failed because the original receiving account was closed. Please provide a new account in your own name, or an authorization letter for a third-party payee.")
+        elif "told-failure" not in notes:
+            tell("The payout failed because the original receiving account was closed. Please contact us with a new account in your own name, or an authorization letter for a third-party payee.")
+            call("add_ticket_note", ticket_id=ticket_id, text="told-failure and the documents needed.")
         elif visit:
-            call("say", text="赔款支付失败，需要更换账户，请提供新账户信息。")
+            call("say", text="The payout failed and the account needs changing; please provide the new account details.")
         if wrong_payee and visit:
             call("retry_payout", **subject)
     elif visit:
-        tell("您的赔款仍在处理中，到账后我们会通知您，请您耐心等待。")
+        tell("Your payout is still being processed; we will notify you once it arrives, so please wait.")
     if claim_early:
-        tell("您的赔款已到账。")
+        tell("Your payout has arrived.")
     schedule_daily()
     return "CONFIRMED" if visit else None
 
@@ -512,9 +512,9 @@ def close_early(session, call):
     if session["trigger_type"] != "case_intake":
         return "CONFIRMED" if session["trigger_type"] == "user_visit" else None
     user_id, subject = session["user_id"], {"claim_id": session["claim_id"]}
-    ticket_id = call("create_ticket", user_id=user_id, summary="赔款支付", **subject)
+    ticket_id = call("create_ticket", user_id=user_id, summary="Payout", **subject)
     call("pay_claim", **subject)
-    call("send_message_to_user", user_id=user_id, channel="secure_inbox", text="您的赔款已到账。")
+    call("send_message_to_user", user_id=user_id, channel="secure_inbox", text="Your payout has arrived.")
     call("close_ticket", ticket_id=ticket_id, resolution_code="paid")
     return None
 
@@ -670,7 +670,7 @@ AGENTS = kit.name_agents(
 CLAIM_PAYOUT = ServicingTemplate(
     industry="insurance",
     template=TEMPLATE,
-    title="理赔款打款失败",
+    title="Claim payout failed",
     generate=generate,
     environment=PayoutEnvironment,
     evaluate=evaluate,

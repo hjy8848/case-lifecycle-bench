@@ -90,7 +90,7 @@ TOOLS = [
     ),
 ]
 
-_DONE = {"changed": r"已(?:为您)?(?:改约|改好|改期|调整)(?:成功|完成)?"}
+_DONE = {"changed": r"(?i)(?:has|have) been (?:rebooked|rescheduled|changed|adjusted)|(?:was|is) (?:rebooked|rescheduled|changed)|we (?:have |'ve )?(?:rebooked|rescheduled|changed)|reschedul(?:e|ing) (?:is )?(?:complete|done|successful)"}
 _SLOTS = [kit.iso_slot(s) for s in ("D8 14:00-16:00", "D9 14:00-16:00", "D10 09:00-11:00")]
 
 
@@ -99,17 +99,17 @@ _SLOTS = [kit.iso_slot(s) for s in ("D8 14:00-16:00", "D9 14:00-16:00", "D10 09:
 
 def _persona(kind: str, chosen: str | None) -> str:
     base = (
-        "你是一位已预约 D3 上午上门安装的客户，想改一下时间，你只模糊地说想改到“下周某天下午”。"
-        "对方会给你可选的时段。"
+        "You are a customer booked for an installation visit on the morning of January 7 who wants to change the time, and you only vaguely say you want 'some afternoon next week'. "
+        "They will give you the available slots. "
     )
     if kind == "wait":
-        return base + "你还没想好，对方让你选时段你说“我再看看”，不选；对方说要收上门费你也说考虑一下。"
+        return base + "You have not decided: when asked to pick a slot you say 'Let me look again' and do not pick; when told a visit fee applies you also say you will think about it. "
     return (
         base
-        + f"你选 {chosen}（对方提供的时段里有它就明确说“选 {chosen}”）。"
-        + "对方说临时改约要收上门费时你同意。"
-        + ("这已经是你第三次改时间了。" if kind == "escalate" else "")
-        + "改好后你可以结束对话。"
+        + f"You choose {chosen} (if it is among the slots they offer, you clearly say 'Choose {chosen}'). "
+        + "When told a late reschedule carries a visit fee, you agree. "
+        + ("This is already your third time changing the time. " if kind == "escalate" else "")
+        + "Once it is changed you may end the conversation."
     )
 
 
@@ -145,7 +145,7 @@ def generate(seed: int) -> dict:
             "prior_changes": 2 if variant == "escalate" else 0,
             "fee": _FEE,
         },
-        "intake": {"t": "D1 10:00", "note": f"客户已预约 {kit.iso_slot('D3 09:00-11:00')} 上门安装，请建工单并留意客户的改约。"},
+        "intake": {"t": "D1 10:00", "note": f"The customer has booked {kit.iso_slot('D3 09:00-11:00')} for an installation visit; create a ticket and watch for the customer's rescheduling."},
         "events": [
             {
                 "id": "E1",
@@ -161,7 +161,7 @@ def generate(seed: int) -> dict:
                 "t": "D2 20:00",
                 "channel": "secure_chat",
                 "utterance": rng.choice(
-                    ("我想改一下明天的安装时间，下周某天下午吧。", "明天上午我来不了，能改到下周下午吗？")
+                    ("I would like to change tomorrow's installation time to some afternoon next week.", "I cannot make tomorrow morning. Can it be moved to an afternoon next week?")
                 ),
                 "goal": script["persona"] + kit.NO_HUMAN_REQUEST,
                 "script": script,
@@ -171,8 +171,8 @@ def generate(seed: int) -> dict:
                 "t": "D3 11:00",
                 "channel": "secure_chat",
                 "condition": {"no_message_after_applied_event": "E1"},
-                "utterance": "师傅今天早上还是按原时间来了，我以为已经改了，到底怎么回事？",
-                "goal": "以为已经改约了，师傅却按原时间上门，来投诉。" + kit.NO_HUMAN_REQUEST,
+                "utterance": "The technician still came at the original time this morning. I thought it was already changed. What happened?",
+                "goal": "You thought the booking was already changed but the technician came at the original time, and you come to complain." + kit.NO_HUMAN_REQUEST,
                 "script": script,
             },
         ],
@@ -268,7 +268,7 @@ def _run(session, call, *, choose_for_customer=False, skip_fee=False, cancel_ori
     ticket_id = (
         tickets[0]["ticket_id"]
         if tickets
-        else call("create_ticket", user_id=user_id, summary="安装预约改约", **subject)
+        else call("create_ticket", user_id=user_id, summary="Installation booking reschedule", **subject)
     )
     visit = kind == "user_visit"
     view = call("read_service_order", **subject)
@@ -287,10 +287,10 @@ def _run(session, call, *, choose_for_customer=False, skip_fee=False, cancel_ori
             if task["status"] == "pending" and task["due_at"] >= due
         ]
         if not pending:
-            call("schedule_followup", ticket_id=ticket_id, due_at=due, note="跟进客户的改约决定")
+            call("schedule_followup", ticket_id=ticket_id, due_at=due, note="Follow up the customer's rescheduling decision")
 
     if kind == "case_intake":
-        call("add_ticket_note", ticket_id=ticket_id, text=f"已预约 {view['appointment']['slot']}。")
+        call("add_ticket_note", ticket_id=ticket_id, text=f"Booked {view['appointment']['slot']}.")
         return None
 
     ticket = call("get_ticket", ticket_id=ticket_id)
@@ -302,21 +302,21 @@ def _run(session, call, *, choose_for_customer=False, skip_fee=False, cancel_ori
 
     if not visit:
         # A wake with nobody to talk to: tell the customer where things stand and wait.
-        if "已告知现状" not in notes or view["status"] == "original_slot_passed":
+        if "status-told" not in notes or view["status"] == "original_slot_passed":
             slot = view["appointment"]["slot"]
-            tell(f"您的预约目前仍是 {slot}，想改时间请告诉我们，我们会提供可选时段。")
-            call("add_ticket_note", ticket_id=ticket_id, text="已告知现状")
+            tell(f"Your booking is currently still {slot}; if you want to change the time, tell us and we will offer the available slots.")
+            call("add_ticket_note", ticket_id=ticket_id, text="status-told")
         schedule_daily()
         return None
 
     contact_id = session["contact_id"]
     if view["changes_made"] >= 2:
-        if "已转人工" not in notes and not skip_escalation:
-            tell("您这是第三次改时间，我们已转交人工协调同事跟进，他们会与您联系。")
-            call("escalate_to_human", ticket_id=ticket_id, note="同一单第三次改约，转人工协调。")
-            call("add_ticket_note", ticket_id=ticket_id, text="已转人工协调并告知客户。")
+        if "handed-to-human" not in notes and not skip_escalation:
+            tell("This is your third time changing the time, so we have passed it to a human coordinating colleague, who will contact you.")
+            call("escalate_to_human", ticket_id=ticket_id, note="Third reschedule on the same order; handing to human coordination.")
+            call("add_ticket_note", ticket_id=ticket_id, text="handed-to-human coordinator and customer told.")
         else:
-            call("say", text="已转交人工协调，请等待同事联系。")
+            call("say", text="Passed to human coordination; please wait for a colleague to contact you.")
         return "CONFIRMED"
     offered = call("offer_available_slots", contact_id=contact_id)
     chosen = offered.get("customer_choice")
@@ -324,20 +324,20 @@ def _run(session, call, *, choose_for_customer=False, skip_fee=False, cancel_ori
         chosen = next((s for s in offered["slots"] if s != chosen), offered["slots"][0])
     short_notice = _slot_start(view["appointment"]["slot"]) - datetime.fromisoformat(session["t"]) < timedelta(hours=24)
     if short_notice and not skip_fee and chosen:
-        tell(f"距上门不足 24 小时改约要收 {view['fee_amount']} 元上门费，您是否同意？")
+        tell(f"Rescheduling less than 24 hours before the visit carries a fee of {view['fee_amount']} yuan. Do you agree?")
         call("record_fee_consent", contact_id=contact_id)
     if chosen:
         changed = call("reschedule_appointment", contact_id=contact_id, slot=chosen)
         if changed.get("ok"):
-            tell(f"已为您改约到 {chosen}，原预约同时取消。")
-            call("add_ticket_note", ticket_id=ticket_id, text=f"已改约 {chosen}，客户已确认。")
+            tell(f"We have rebooked you to {chosen}; the original booking is cancelled.")
+            call("add_ticket_note", ticket_id=ticket_id, text=f"Rebooked {chosen}; customer confirmed.")
             for task in call("list_followups", ticket_id=ticket_id):
                 if task["status"] == "pending":
                     call("cancel_followup", task_id=task["task_id"])
             call("close_ticket", ticket_id=ticket_id, resolution_code="rescheduled")
             return "CONFIRMED"
-    tell(f"好的，您考虑好后告诉我们；在您确认新时段之前，原预约 {view['appointment']['slot']} 保持不变。")
-    call("add_ticket_note", ticket_id=ticket_id, text="已告知现状")
+    tell(f"Understood, tell us once you have decided; until you confirm a new slot, the original booking {view['appointment']['slot']} stays unchanged.")
+    call("add_ticket_note", ticket_id=ticket_id, text="status-told")
     schedule_daily()
     return "CONFIRMED"
 
@@ -370,8 +370,8 @@ def close_early(session, call):
     if session["trigger_type"] != "case_intake":
         return "CONFIRMED" if session["trigger_type"] == "user_visit" else None
     user_id, subject = session["user_id"], {"service_order_id": session["service_order_id"]}
-    ticket_id = call("create_ticket", user_id=user_id, summary="安装预约", **subject)
-    call("send_message_to_user", user_id=user_id, channel="secure_inbox", text="已为您改约完成。")
+    ticket_id = call("create_ticket", user_id=user_id, summary="Installation booking", **subject)
+    call("send_message_to_user", user_id=user_id, channel="secure_inbox", text="Your reschedule is done.")
     call("close_ticket", ticket_id=ticket_id, resolution_code="rescheduled")
     return None
 
@@ -511,7 +511,7 @@ AGENTS = kit.name_agents(
 RESCHEDULE = ServicingTemplate(
     industry="field_service",
     template=TEMPLATE,
-    title="客户临时改时间",
+    title="Customer changes time at short notice",
     generate=generate,
     environment=RescheduleEnvironment,
     evaluate=evaluate,

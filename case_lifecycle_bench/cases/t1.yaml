@@ -13,8 +13,8 @@
       "id": "V1",
       "t": "D1 10:00",
       "channel": "chat",
-      "goal": "商品有故障，要求退款",
-      "utterance": "订单 O1 的商品有故障，我想申请退款。",
+      "goal": "The item is faulty; you ask for a refund",
+      "utterance": "The item in order O1 is faulty and I want to apply for a refund.",
       "knows": ["order_id", "defect_description"]
     },
     {
@@ -22,11 +22,11 @@
       "t": "D4 15:00",
       "channel": "chat",
       "condition": "refund(order=O1).status != succeeded",
-      "goal": "钱还没到，问进度；若 Agent 提出再退一次则接受",
-      "utterance": "上次说的退款还没到账，能帮我查一下吗？",
+      "goal": "The money has not arrived and you ask about progress; if the agent offers to refund again, you accept",
+      "utterance": "The refund mentioned last time has not arrived. Can you check it for me?",
       "knows": [],
-      "observes": ["银行流水无入账", "收到过的消息"],
-      "persona": "不满，催促"
+      "observes": ["No deposit in the bank statement", "Messages received"],
+      "persona": "Unhappy, pressing"
     }
   ],
   "events": [

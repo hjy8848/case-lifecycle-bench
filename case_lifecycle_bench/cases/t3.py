@@ -7,7 +7,7 @@ from ._tools import (
     schedule_followup,
 )
 
-_INTERCEPT_NOTE = "核实承运商是否完成包裹拦截。"
+_INTERCEPT_NOTE = "Verify whether the carrier completed the parcel interception."
 
 
 def t3_case():
@@ -43,7 +43,7 @@ def close_early(session, call):
     user_id = session["user_id"]
     order_id = session["order_id"]
     ticket_id = call(
-        "create_ticket", user_id=user_id, order_ids=[order_id], summary="取消订单并退款"
+        "create_ticket", user_id=user_id, order_ids=[order_id], summary="Cancel the order and refund"
     )
     call("cancel_pending_order", order_id=order_id)
     call("get_fulfillment_status", order_id=order_id)
@@ -52,7 +52,7 @@ def close_early(session, call):
         "send_message_to_user",
         user_id=user_id,
         channel="chat",
-        text="您的订单已全部取消，退款已办好。",
+        text="Your order has been fully cancelled and the refund is done.",
     )
     call("close_ticket", ticket_id=ticket_id, resolution_code="resolved")
     return "CONFIRMED"
@@ -65,13 +65,13 @@ def _revisit(session, call):
     ticket = call("search_tickets", user_id=user_id, order_id=order_id)[0]
     shipment = call("get_shipment", order_id=order_id)
     if shipment["status"] == "delivered":
-        text = "包裹已被签收，拦截没有成功，我们会按退货流程联系您。"
+        text = "The parcel was delivered and the interception did not succeed; we will contact you through the returns process."
     elif shipment["status"] == "intercepted":
-        text = "承运商已确认拦截，退款正在处理，到账前我们会继续跟进。"
+        text = "The carrier has confirmed the interception and the refund is processing; we will keep following up until it arrives."
     else:
-        text = "承运商仍在处理拦截请求，结果出来前暂不能退款，我们会继续跟进。"
+        text = "The carrier is still processing the interception request; we cannot refund until there is a result, and we will keep following up."
     call("say", text=text)
-    call("add_ticket_note", ticket_id=ticket["ticket_id"], text="客户回访询问进度，已如实告知。")
+    call("add_ticket_note", ticket_id=ticket["ticket_id"], text="Customer came back asking about progress; told truthfully.")
     return "CONFIRMED"
 
 
@@ -86,7 +86,7 @@ def _run(session, call, *, reschedule=True, refund_early=False):
             "create_ticket",
             user_id=user_id,
             order_ids=[order_id],
-            summary="取消已出库订单并退款",
+            summary="Cancel a shipped order and refund",
         )
         call("cancel_pending_order", order_id=order_id)
         call("get_fulfillment_status", order_id=order_id)
@@ -97,15 +97,15 @@ def _run(session, call, *, reschedule=True, refund_early=False):
         call(
             "add_ticket_note",
             ticket_id=ticket_id,
-            text="订单已在 OMS 取消，承运商正在处理拦截请求。",
+            text="The order is cancelled in OMS and the carrier is processing the interception request.",
         )
-        call("say", text="包裹已经发货，我已申请拦截，确认拦截后才能退款。")
+        call("say", text="The parcel has shipped and I have requested interception; I can refund only after interception is confirmed.")
         return "CONFIRMED"
 
     ticket = get_trigger_ticket(session, call)
     ticket_id = ticket["ticket_id"]
     order_id = ticket["order_ids"][0]
-    if session.get("note", "").startswith("核实退款 ") or session["trigger_id"] == "E2":
+    if session.get("note", "").startswith("Verify refund ") or session["trigger_id"] == "E2":
         _check_refund(call, ticket)
         return None
 
@@ -116,13 +116,13 @@ def _run(session, call, *, reschedule=True, refund_early=False):
         call(
             "add_ticket_note",
             ticket_id=ticket_id,
-            text="第一次核实，承运商暂未确认拦截。",
+            text="First check; the carrier has not yet confirmed the interception.",
         )
         call(
             "send_message_to_user",
             user_id=ticket["user_id"],
             channel="chat",
-            text="承运商仍在处理拦截请求，结果出来前暂不能退款，我们会继续跟进。",
+            text="The carrier is still processing the interception request; we cannot refund until there is a result, and we will keep following up.",
         )
     elif shipment["status"] == "delivered":
         cancel_pending_followups(call, ticket_id, _INTERCEPT_NOTE)
@@ -130,17 +130,17 @@ def _run(session, call, *, reschedule=True, refund_early=False):
             "send_message_to_user",
             user_id=ticket["user_id"],
             channel="chat",
-            text="包裹已被签收，拦截没有成功。我们已转交退货组，会按退货流程联系您。",
+            text="The parcel was delivered and the interception did not succeed. We have passed this to the returns team, who will contact you through the returns process.",
         )
         call(
             "escalate_to_human",
             ticket_id=ticket_id,
-            note="拦截失败，包裹已签收，改走退货流程。",
+            note="Interception failed and the parcel was delivered; switching to the returns process.",
         )
         call(
             "add_ticket_note",
             ticket_id=ticket_id,
-            text="拦截失败，已通知客户并转退货组，不退款。",
+            text="Interception failed; customer told and handed to the returns team; no refund.",
         )
     elif shipment["status"] == "intercepted":
         cancel_pending_followups(call, ticket_id, _INTERCEPT_NOTE)
@@ -150,12 +150,12 @@ def _run(session, call, *, reschedule=True, refund_early=False):
             "send_message_to_user",
             user_id=ticket["user_id"],
             channel="chat",
-            text="承运商已确认拦截包裹，退款已提交，支付网关正在处理。",
+            text="The carrier has confirmed the interception, the refund is submitted, and the payment gateway is processing it.",
         )
         call(
             "add_ticket_note",
             ticket_id=ticket_id,
-            text="承运商已确认拦截，已通知客户，退款待核实。",
+            text="The carrier confirmed the interception; customer told; refund to be verified.",
         )
     return None
 
@@ -164,7 +164,7 @@ def _issue_refund(session, call, ticket_id, order_id):
     order = call("get_order_details", order_id=order_id)
     refund_id = call("issue_refund", order_id=order_id, amount=order["amount"])
     schedule_followup(
-        session, call, ticket_id, 48, f"核实退款 {refund_id} 的支付网关状态。"
+        session, call, ticket_id, 48, f"Verify refund {refund_id} at the payment gateway."
     )
 
 
@@ -183,17 +183,17 @@ def _check_refund(call, ticket):
             "send_message_to_user",
             user_id=ticket["user_id"],
             channel="chat",
-            text="已核实退款到账。",
+            text="Refund arrival verified.",
         )
         call(
             "add_ticket_note",
             ticket_id=ticket_id,
-            text=f"退款 {refund_id} 已到账，客户已通知。",
+            text=f"Refund {refund_id} arrived; customer told.",
         )
         call("close_ticket", ticket_id=ticket_id, resolution_code="refunded")
     else:
         call(
             "add_ticket_note",
             ticket_id=ticket_id,
-            text=f"退款 {refund_id} 仍在处理中，工单保留。",
+            text=f"Refund {refund_id} is still processing; ticket kept open.",
         )

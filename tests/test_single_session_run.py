@@ -73,11 +73,11 @@ class SingleSessionTest(unittest.TestCase):
                     r for r in run["trajectory"]
                     if r["kind"] == "world_event" and r.get("notify_agent") and r.get("changes")
                 ]
-                system = [text for text in told if text.startswith("[系统]")]
+                system = [text for text in told if text.startswith("[System]")]
                 self.assertGreaterEqual(len(system), len(notified))
-                self.assertTrue(any("现在是 2026-" in text for text in system))
+                self.assertTrue(any("The time is now 2026-" in text for text in system))
                 self.assertTrue(
-                    all(text.startswith("[系统]") or text.startswith("[系统") or "现在是" in text for text in system)
+                    all(text.startswith("[System]") or text.startswith("[System") or "The time is now" in text for text in system)
                 )
 
     def test_the_agent_has_no_follow_up_tools_but_can_wait(self):
@@ -90,7 +90,7 @@ class SingleSessionTest(unittest.TestCase):
 
         def model(messages):
             last = messages[-1]["content"]
-            if last.startswith("[系统] 现在是 D1"):
+            if last.startswith("[System] The time is now 2026-01-05"):
                 return {
                     "content": "",
                     "tool_calls": [
@@ -115,8 +115,8 @@ class SingleSessionTest(unittest.TestCase):
         self.assertNotIn("followup_pending", evaluation["terminal"]["agent"])
 
     def test_describing_an_event_does_not_reveal_what_the_agent_must_find_out(self):
-        self.assertEqual(describe({"op": "part_arrived", "model_ok": False}), "配件到货")
-        self.assertNotIn("型号", describe({"op": "part_arrived", "model_ok": False}))
+        self.assertEqual(describe({"op": "part_arrived", "model_ok": False}), "The part arrived")
+        self.assertNotIn("model", describe({"op": "part_arrived", "model_ok": False}))
 
 
 if __name__ == "__main__":

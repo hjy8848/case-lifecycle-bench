@@ -88,8 +88,8 @@ TOOLS = [
     ),
 ]
 
-_ARRIVED = {"arrived": r"已(?:经)?到账|已(?:经)?(?:成功)?放款|款项已(?:发放|到账)|已打到"}
-_NAMES = ("陈明", "王芳", "李强", "张伟", "刘洋", "赵敏", "周杰", "孙丽")
+_ARRIVED = {"arrived": r"(?i)has (?:been )?(?:arrived|disbursed|credited|paid)|(?:was|been) (?:disbursed|credited)|successfully disbursed|funds (?:have )?arrived|money (?:has )?arrived"}
+_NAMES = ("Michael Chen", "Fiona Wang", "Daniel Li", "Wayne Zhang", "Ethan Liu", "Mia Zhao", "Jason Zhou", "Linda Sun")
 
 
 # -- generation --------------------------------------------------------------
@@ -122,8 +122,8 @@ def generate(seed: int) -> dict:
                 "id": "V2",
                 "t": "D2 15:00",
                 "channel": "secure_chat",
-                "utterance": rng.choice(("款一直没到，你们再打一次吧！", "钱呢？再给我打一笔。")),
-                "goal": "放款一直没到账，催公司再打一次。" + kit.NO_HUMAN_REQUEST,
+                "utterance": rng.choice(("The money never arrived, just send it again!", "Where is my money? Send me another payment.")),
+                "goal": "The disbursement never arrived; you press the company to send it again." + kit.NO_HUMAN_REQUEST,
                 "script": {},
             }
         )
@@ -144,11 +144,11 @@ def generate(seed: int) -> dict:
                 "id": "V2",
                 "t": "D2 15:00",
                 "channel": "secure_chat",
-                "utterance": rng.choice(("放款一直没到，我的账户有问题吗？", "钱怎么还没到我的卡上？")),
+                "utterance": rng.choice(("The money never arrived. Is something wrong with my account?", "Why is the money still not on my card?")),
                 "goal": (
-                    f"你是贷款客户{borrower}，放款没到账。你知道原来的收款账户有问题，"
-                    f"愿意换成你本人名下的新账户，户名「{borrower}」，账号 {new_account}。"
-                    "核验身份时你配合，对方办完后可以结束对话。"
+                    f"You are a loan customer{borrower}, and the disbursement did not arrive. You know the original receiving account has a problem, "
+                    f"and you are willing to switch to a new account in your own name, account holder '{borrower}', account number {new_account}."
+                    ". You cooperate when they verify your identity, and may end the conversation once they are done."
                 )
                 + kit.NO_HUMAN_REQUEST,
                 "script": {"account_number": new_account, "holder_name": borrower},
@@ -170,8 +170,8 @@ def generate(seed: int) -> dict:
             "t": revisit_t,
             "channel": "secure_chat",
             "condition": {"no_message_after_event": "E1"},
-            "utterance": "钱呢？到现在也没人告诉我是什么情况。",
-            "goal": "放款状态一直没人通知，来问钱到哪了。" + kit.NO_HUMAN_REQUEST,
+            "utterance": "Where is my money? No one has told me what is going on.",
+            "goal": "No one has told you the disbursement status, and you ask where the money is." + kit.NO_HUMAN_REQUEST,
             "script": {},
         }
     )
@@ -191,7 +191,7 @@ def generate(seed: int) -> dict:
             "amount": amount,
             "old_account": old_account,
         },
-        "intake": {"t": "D1 10:00", "note": "客户的个人贷款已批准，请发起放款并跟进到账。"},
+        "intake": {"t": "D1 10:00", "note": "The customer's personal loan is approved; initiate the disbursement and follow up until it arrives."},
         "events": events,
         "visits": visits,
     }
@@ -247,7 +247,7 @@ class DisbursementEnvironment(ChatContactMixin, ServicingEnvironment):
             return {}
         op = event["op"]
         if op == "disbursement_failed":
-            rows = [*record["disbursements"][:-1], {**latest, "state": "failed", "reason": "收款户名与账户不符"}]
+            rows = [*record["disbursements"][:-1], {**latest, "state": "failed", "reason": "Receiving account holder does not match the account"}]
             new = {**record, "status": "disbursement_failed", "disbursements": rows}
         elif op == "disbursement_succeeded" and len(record["disbursements"]) > 1:
             rows = [*record["disbursements"][:-1], {**latest, "state": "disbursed"}]
@@ -321,7 +321,7 @@ def _run(session, call, *, resend=False, same_account=False, claim_early=False, 
     ticket_id = (
         tickets[0]["ticket_id"]
         if tickets
-        else call("create_ticket", user_id=user_id, summary="放款跟进", **subject)
+        else call("create_ticket", user_id=user_id, summary="Disbursement follow-up", **subject)
     )
     visit = kind == "user_visit"
 
@@ -344,14 +344,14 @@ def _run(session, call, *, resend=False, same_account=False, claim_early=False, 
             if task["status"] == "pending" and task["due_at"] >= due
         ]
         if not pending:
-            call("schedule_followup", ticket_id=ticket_id, due_at=due, note="核实放款状态")
+            call("schedule_followup", ticket_id=ticket_id, due_at=due, note="Check the disbursement status")
 
     if kind == "case_intake":
         call("submit_disbursement", **subject)
         call("read_disbursement", **subject)
         if resend:
             call("submit_disbursement", **subject)
-        call("add_ticket_note", ticket_id=ticket_id, text="已发起放款，待核实到账。")
+        call("add_ticket_note", ticket_id=ticket_id, text="Disbursement initiated; verify arrival later.")
         schedule_daily()
         return None
 
@@ -363,19 +363,19 @@ def _run(session, call, *, resend=False, same_account=False, claim_early=False, 
     latest = view["disbursements"][-1] if view["disbursements"] else None
 
     if view["status"] == "disbursed":
-        tell("已核实放款到账，感谢您的配合。")
-        call("add_ticket_note", ticket_id=ticket_id, text="放款已到账，已通知客户。")
+        tell("We have verified that the disbursement arrived. Thank you for your cooperation.")
+        call("add_ticket_note", ticket_id=ticket_id, text="Disbursement arrived; customer told.")
         cancel_followups()
         call("close_ticket", ticket_id=ticket_id, resolution_code="disbursed")
         return "CONFIRMED" if visit else None
     if stuck_since(latest, datetime.fromisoformat(session["t"])):
-        if not skip_escalation and "已转放款运营" not in notes:
-            tell("您的放款处理超过 2 天仍无结果，已转交放款运营处理，我们会通知您结果。")
-            call("escalate_to_human", ticket_id=ticket_id, note="放款处理超过 2 天无结果，转放款运营。")
-            call("add_ticket_note", ticket_id=ticket_id, text="已转放款运营并通知客户。")
+        if not skip_escalation and "handed-to-disbursement-ops" not in notes:
+            tell("Your disbursement has had no result after more than 2 days, so we have passed it to disbursement operations and will tell you the result.")
+            call("escalate_to_human", ticket_id=ticket_id, note="Disbursement unresolved after 2 days; handing to disbursement operations.")
+            call("add_ticket_note", ticket_id=ticket_id, text="handed-to-disbursement-ops and customer told.")
             cancel_followups()
         elif visit:
-            call("say", text="放款仍在运营处理中，结果出来后我们会通知您。")
+            call("say", text="The disbursement is still with operations; we will notify you once there is a result.")
         return "CONFIRMED" if visit else None
     if latest and latest["state"] == "failed":
         if visit and session.get("contact_id"):
@@ -396,21 +396,21 @@ def _run(session, call, *, resend=False, same_account=False, claim_early=False, 
                 )
                 if confirmed.get("ok"):
                     call("resubmit_disbursement", **subject)
-                    tell("已为您更换为本人名下的新账户并重新提交放款，到账后我们会通知您。")
-                    call("add_ticket_note", ticket_id=ticket_id, text="已核验身份、更换账户并重提。")
+                    tell("We have switched you to the new account in your own name and resubmitted the disbursement; we will notify you once it arrives.")
+                    call("add_ticket_note", ticket_id=ticket_id, text="Identity verified, account changed and disbursement resubmitted.")
             else:
-                tell("放款因收款户名与账户不符失败，请提供您本人名下的新账户。")
-        elif "已告知失败" not in notes:
-            tell("放款因收款户名与账户不符失败，请联系我们提供您本人名下的新账户。")
-            call("add_ticket_note", ticket_id=ticket_id, text="已告知失败及所需信息。")
+                tell("The disbursement failed because the account holder does not match the account. Please provide a new account in your own name.")
+        elif "told-failure" not in notes:
+            tell("The disbursement failed because the account holder does not match the account. Please contact us with a new account in your own name.")
+            call("add_ticket_note", ticket_id=ticket_id, text="told-failure and the information needed.")
         elif visit:
-            call("say", text="放款失败，需要更换为本人名下的新账户，请提供账户信息。")
+            call("say", text="The disbursement failed and needs a new account in your own name; please provide the account details.")
         if same_account and visit:
             call("resubmit_disbursement", **subject)
     elif visit:
-        tell("您的放款仍在处理中，到账后我们会通知您，请耐心等待。")
+        tell("Your disbursement is still being processed; we will notify you once it arrives, so please wait.")
     if claim_early:
-        tell("您的款项已到账。")
+        tell("Your funds have arrived.")
     schedule_daily()
     return "CONFIRMED" if visit else None
 
@@ -447,9 +447,9 @@ def close_early(session, call):
     if session["trigger_type"] != "case_intake":
         return "CONFIRMED" if session["trigger_type"] == "user_visit" else None
     user_id, subject = session["user_id"], {"loan_id": session["loan_id"]}
-    ticket_id = call("create_ticket", user_id=user_id, summary="放款", **subject)
+    ticket_id = call("create_ticket", user_id=user_id, summary="Disbursement", **subject)
     call("submit_disbursement", **subject)
-    call("send_message_to_user", user_id=user_id, channel="secure_inbox", text="您的款项已到账。")
+    call("send_message_to_user", user_id=user_id, channel="secure_inbox", text="Your funds have arrived.")
     call("close_ticket", ticket_id=ticket_id, resolution_code="disbursed")
     return None
 
@@ -596,7 +596,7 @@ AGENTS = kit.name_agents(
 DISBURSEMENT = ServicingTemplate(
     industry="credit",
     template=TEMPLATE,
-    title="放款失败",
+    title="Disbursement failed",
     generate=generate,
     environment=DisbursementEnvironment,
     evaluate=evaluate,

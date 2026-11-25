@@ -245,23 +245,23 @@ class ClaimTest(unittest.TestCase):
 
     def test_received_and_decision_statements_are_claims(self):
         self.assertEqual(
-            self.kinds("您的材料我们已经收到了。", "您的申请已通过。"),
+            self.kinds("We have received your documents.", "Your application has been approved."),
             [(0, "received"), (1, "decision")],
         )
 
     def test_waiting_statements_are_not_claims(self):
         self.assertEqual(
             self.kinds(
-                "申请系统尚未确认接收，确认后我们会通知您。",
-                "审批结论以审批中心为准，目前无法预估结果和时间。",
-                "审批中心已出结论：您的申请未通过。",
+                "The application system has not yet confirmed receipt; we will notify you once it does.",
+                "The conclusion is up to the approval center, and I cannot predict the result or the time.",
+                "The approval center has reached a conclusion: your application was not approved.",
             ),
             [],
         )
 
     def test_promising_a_result_or_a_time_is_a_claim_even_when_hedged_by_expected(self):
         self.assertEqual(
-            self.kinds("预计 3 天内出结果。", "大概率能批，请放心。", "您一定能批下来。"),
+            self.kinds("Expect a result within 3 days.", "It will most likely be approved, so do not worry.", "You will definitely be approved."),
             [(0, "promise"), (1, "promise"), (2, "promise")],
         )
 

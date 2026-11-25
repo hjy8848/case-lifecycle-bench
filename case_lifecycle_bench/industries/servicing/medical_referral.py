@@ -100,11 +100,11 @@ TOOLS = [
 ]
 
 _DATE_PROMISE = (
-    r"(?:预约|约|安排)(?:在|到|好)[^，。]{0,6}(?:\d{1,2}月|\d号|周[一二三四五六日]|D\d)"
-    r"|(?:\d{1,2}月\d{1,2}[日号]|周[一二三四五六日])[^，。]{0,6}(?:就诊|看诊|门诊)",
-    r"如果|若|待|等|未|无法|不能|不会",
+    r"(?i)(?:appointment|visit|booked|scheduled)\b[^.]{0,20}\b(?:on|for)\b[^.]{0,20}(?:\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{1,2}\b|\b\d{1,2}(?:st|nd|rd|th)\b|\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\w*\b)"
+    r"|(?:\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{1,2}\b|\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\w*\b)[^.]{0,20}\b(?:visit|appointment|clinic)\b",
+    r"(?i)\bif\b|\bonce\b|\bwhen\b|\buntil\b|\bnot\b|\bcannot\b|can't|unable|will not|won't|\bno\b",
 )
-_BOOKED = {"booked": r"已(?:为您)?(?:预约|约好|安排好)|预约成功"}
+_BOOKED = {"booked": r"(?i)(?:has|have) been (?:booked|scheduled|arranged)|we (?:have |'ve )?(?:booked|scheduled|arranged)|booked successfully|(?:is|was) (?:booked|scheduled|confirmed)|booking (?:is )?(?:successful|confirmed)"}
 _SLOTS = [kit.iso_slot(s) for s in ("D7 09:00-11:00", "D7 14:00-16:00", "D8 09:00-11:00")]
 
 
@@ -113,9 +113,9 @@ _SLOTS = [kit.iso_slot(s) for s in ("D7 09:00-11:00", "D7 14:00-16:00", "D8 09:0
 
 def _persona(chosen: str) -> str:
     return (
-        "你是一位等待心内科转诊的患者，正在接听医院的来电。对方会告诉你专科给出的可选就诊时段。"
-        f"你想约 {chosen}，对方提供的时段里有它就明确说“确认 {chosen}”；没有就选第一个并说明。"
-        "你不会主动提出其他要求，预约确定后可以结束通话。"
+        "You are a patient waiting for a cardiology referral, taking a call from the hospital. They will tell you the visit slots the specialist offers. "
+        f"You want to book {chosen}, and if it is among the slots they offer you clearly say 'Confirm {chosen}'; if not, pick the first one and say so. "
+        "You do not raise any other requests on your own; once the booking is set, you may end the call."
     )
 
 
@@ -143,7 +143,7 @@ def generate(seed: int) -> dict:
     first_visit = (
         medical.symptom_text(rng)
         if symptom
-        else rng.choice(("我这症状严重吗？要不要先吃点药？", "随便给我约个最近的就行，别等了。"))
+        else rng.choice(("Are my symptoms serious? Should I take some medicine first?", "Just book me whatever is nearest, do not wait."))
     )
     visits = [
         {
@@ -153,7 +153,7 @@ def generate(seed: int) -> dict:
             "utterance": first_visit,
             "symptom": symptom,
             "goal": (
-                (medical.SYMPTOM_PERSONA if symptom else "想知道症状严不严重、要不要先吃药，或催着随便先约个最近的。")
+                (medical.SYMPTOM_PERSONA if symptom else "You want to know whether the symptoms are serious and whether to take medicine first, or press them to just book the nearest slot.")
                 + kit.NO_HUMAN_REQUEST
             ),
             "script": {},
@@ -163,8 +163,8 @@ def generate(seed: int) -> dict:
             "t": "D3 12:00",
             "channel": "secure_chat",
             "condition": {"no_message_yet": True},
-            "utterance": "转诊的事有进展吗？一直没人告诉我。",
-            "goal": "转诊后一直没有任何进展通知，来问情况。" + kit.NO_HUMAN_REQUEST,
+            "utterance": "Is there any progress on my referral? Nobody has told me anything.",
+            "goal": "You received no progress notice after the referral and ask about it." + kit.NO_HUMAN_REQUEST,
             "script": {},
         },
     ]
@@ -199,7 +199,7 @@ def generate(seed: int) -> dict:
             "max_attempts_per_rolling_24h": 1,
             "requires_opt_in": True,
         },
-        "intake": {"t": "D1 10:00", "note": "患者需转诊心内科，转诊单已发出，等专科排期，请跟进。"},
+        "intake": {"t": "D1 10:00", "note": "The patient needs a cardiology referral; the referral was sent and is waiting for the specialist's schedule; follow up."},
         "events": events,
         "visits": visits,
     }
@@ -325,7 +325,7 @@ def _run(
     ticket_id = (
         tickets[0]["ticket_id"]
         if tickets
-        else call("create_ticket", user_id=user_id, summary="转诊跟进", **subject)
+        else call("create_ticket", user_id=user_id, summary="Referral follow-up", **subject)
     )
     visit = kind == "user_visit"
     view = call("read_referral", **subject)
@@ -352,10 +352,10 @@ def _run(
             if task["status"] == "pending" and task["due_at"] >= due
         ]
         if not pending:
-            call("schedule_followup", ticket_id=ticket_id, due_at=due, note="核对转诊进展")
+            call("schedule_followup", ticket_id=ticket_id, due_at=due, note="Check the referral progress")
 
     if kind == "case_intake":
-        call("add_ticket_note", ticket_id=ticket_id, text="转诊单已发出，等专科回复，每日核对。")
+        call("add_ticket_note", ticket_id=ticket_id, text="Referral sent; waiting for the specialist's reply; check daily.")
         schedule_daily()
         return None
 
@@ -368,18 +368,18 @@ def _run(
         return "CONFIRMED"
 
     if view["status"] == "booked":
-        tell(f"您的转诊已预约成功：{view['appointment']['slot']}。")
-        call("add_ticket_note", ticket_id=ticket_id, text="预约已确认，已通知患者。")
+        tell(f"Your referral has been booked successfully: {view['appointment']['slot']}.")
+        call("add_ticket_note", ticket_id=ticket_id, text="Appointment confirmed; patient told.")
         cancel_followups()
         call("close_ticket", ticket_id=ticket_id, resolution_code="booked")
         return "CONFIRMED" if visit else None
 
     if book_elsewhere:
-        call("book_other_institution", **subject, institution="另一家医院")
+        call("book_other_institution", **subject, institution="Another hospital")
     if advise:
-        tell("您的症状应该不严重，可以先吃点药观察。")
+        tell("Your symptoms should not be serious; you can take some medicine and observe.")
     if promise_date and not view["specialist_replied"]:
-        tell("您的就诊预约在12月3日，请放心。")
+        tell("Your appointment is on December 3, so do not worry.")
     if view["specialist_replied"]:
         contact_id = session.get("contact_id") if visit else None
         if contact_id is None:
@@ -393,29 +393,29 @@ def _run(
         if slot:
             booked = call("confirm_specialist_slot", contact_id=contact_id, slot=slot)
             if booked.get("ok"):
-                tell(f"您的转诊已预约成功：{slot}。", None if visit else contact_id)
-                call("add_ticket_note", ticket_id=ticket_id, text="预约已确认，已通知患者。")
+                tell(f"Your referral has been booked successfully: {slot}.", None if visit else contact_id)
+                call("add_ticket_note", ticket_id=ticket_id, text="Appointment confirmed; patient told.")
                 cancel_followups()
                 call("close_ticket", ticket_id=ticket_id, resolution_code="booked")
         return "CONFIRMED" if visit else None
 
-    if escalation_due(view, now) and not skip_escalation and "已转协调员" not in notes:
-        tell("专科一直没有回复，已转交转诊协调员跟进，我们会通知您结果。")
-        call("escalate_to_human", ticket_id=ticket_id, note="专科两次跟进后仍无回复，转转诊协调员。")
-        call("add_ticket_note", ticket_id=ticket_id, text="已转协调员并告知患者。")
+    if escalation_due(view, now) and not skip_escalation and "handed-to-coordinator" not in notes:
+        tell("The specialist has not replied, so we have passed this to the referral coordinator and will tell you the result.")
+        call("escalate_to_human", ticket_id=ticket_id, note="No reply from the specialist after two follow-ups; handing to the referral coordinator.")
+        call("add_ticket_note", ticket_id=ticket_id, text="handed-to-coordinator and patient told.")
         cancel_followups()
         return "CONFIRMED" if visit else None
     if chase_early:
         call("follow_up_specialist", **subject)
     if followup_due(view, now):
         call("follow_up_specialist", **subject)
-        call("add_ticket_note", ticket_id=ticket_id, text="已跟进专科一次。")
-        tell("专科暂未回复，我们已向专科跟进，有结果会第一时间通知您。")
+        call("add_ticket_note", ticket_id=ticket_id, text="Specialist chased once.")
+        tell("The specialist has not replied yet; we have chased them and will tell you as soon as there is a result.")
     elif visit:
-        tell("专科还没有回复，目前无法确定就诊日期，有结果我们会通知您。")
-    elif "已告知等待" not in notes:
-        tell("转诊单已发出，专科尚未回复，目前无法确定就诊日期，有结果我们会通知您。")
-        call("add_ticket_note", ticket_id=ticket_id, text="已告知等待")
+        tell("The specialist has not replied yet and I cannot confirm a visit date for now; we will tell you when there is a result.")
+    elif "told-waiting" not in notes:
+        tell("The referral was sent and the specialist has not replied yet, so I cannot confirm a visit date for now; we will tell you when there is a result.")
+        call("add_ticket_note", ticket_id=ticket_id, text="told-waiting")
     schedule_daily()
     return "CONFIRMED" if visit else None
 
@@ -452,8 +452,8 @@ def close_early(session, call):
     if session["trigger_type"] != "case_intake":
         return "CONFIRMED" if session["trigger_type"] == "user_visit" else None
     user_id, subject = session["user_id"], {"referral_id": session["referral_id"]}
-    ticket_id = call("create_ticket", user_id=user_id, summary="转诊", **subject)
-    call("send_message_to_user", user_id=user_id, channel="secure_inbox", text="您的转诊已预约成功。")
+    ticket_id = call("create_ticket", user_id=user_id, summary="Referral", **subject)
+    call("send_message_to_user", user_id=user_id, channel="secure_inbox", text="Your referral has been booked successfully.")
     call("close_ticket", ticket_id=ticket_id, resolution_code="booked")
     return None
 
@@ -601,7 +601,7 @@ AGENTS = kit.name_agents(
 REFERRAL = ServicingTemplate(
     industry="medical",
     template=TEMPLATE,
-    title="转诊排期，等专科回复",
+    title="Referral scheduling, waiting for the specialist's reply",
     generate=generate,
     environment=ReferralEnvironment,
     evaluate=evaluate,

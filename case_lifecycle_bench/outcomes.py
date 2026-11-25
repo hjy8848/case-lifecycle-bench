@@ -170,17 +170,17 @@ def _spec(template: str) -> OutcomeSpec:
     raise ValueError(f"Template {template!r} has no three-outcome spec yet")
 
 
-_CLAUSE_SPLIT = re.compile(r"[。！？；，,;!?\n]")
+_CLAUSE_SPLIT = re.compile(r"[.!?;,\n]")
 # A clause that promises, hedges or negates is not a claim that the matter is done.
-_HEDGE = re.compile(r"如果|若|一旦|将|会|待|预计|尚未|未|没有|等")
+_HEDGE = re.compile(r"(?i)\bif\b|\bonce\b|\bwill\b|\bwould\b|\bexpect(?:ed)?\b|\bnot yet\b|\bnot\b|\bno\b|\bwaiting\b|\bpending\b|\buntil\b|\bwe'll\b|\bgoing to\b|\bto be\b|\bupon\b|\bafter\b|\bonly\b|\bbefore\b")
 _CLAIMS = {
     "intercepted": re.compile(
-        r"拦截(?:已)?成功|已(?:被|经)?(?:成功)?拦截|拦截完成|已完全取消|已全部取消"
+        r"(?i)interception (?:was |has been |is )?(?:successful|confirmed|complete)|(?:has|have) been intercepted|successfully intercepted|(?:has|have) been (?:fully |completely )?cancelled|(?:fully|completely) cancelled"
     ),
     "refund_done": re.compile(
-        r"退款(?:已)?(?:核实)?(?:成功)?(?:到账|完成)|已(?:成功)?退款|已到账"
+        r"(?i)refund (?:has been |was |is )?(?:verified|successful|complete|completed|issued|arrived|credited)|(?:has|have) been refunded|(?:was|were) refunded|refunded successfully|already refunded|(?:has|have) arrived"
     ),
-    "all_done": re.compile(r"已(?:全部)?办(?:理)?(?:好|完)|问题已(?:经)?解决"),
+    "all_done": re.compile(r"(?i)\b(?:is|are|all) (?:done|completed|taken care of)\b|(?:has|have) been (?:resolved|completed|processed|taken care of)|(?:problem|issue|matter) (?:is |has been )?(?:solved|resolved)"),
 }
 
 

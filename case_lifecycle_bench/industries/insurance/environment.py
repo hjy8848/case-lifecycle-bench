@@ -71,7 +71,7 @@ class InsuranceEnvironment(LifecycleEnvironment):
                 "trigger_id": contact_id,
                 "contact_id": contact_id,
                 "channel": _VOICE,
-                "message": "你好，我接到了续保服务的模拟电话。",
+                "message": "Hello, I got a simulated call about renewal service.",
             }
         else:
             if not self._visit_condition(payload.get("condition")):
@@ -363,11 +363,11 @@ class InsuranceEnvironment(LifecycleEnvironment):
                 "message",
                 session_id,
                 role="agent",
-                text="请先完成模拟身份核验。",
+                text="Please complete the simulated identity verification first.",
                 step=step,
             )
             response = (
-                "身份核验通过。" if result["verified"] else "我未能完成身份核验。"
+                "Identity verification passed." if result["verified"] else "I could not complete the identity verification."
             )
             self._log("message", session_id, role="user", text=response, step=step)
         elif tool == "present_renewal_quote" and result.get("delivered"):
@@ -377,13 +377,13 @@ class InsuranceEnvironment(LifecycleEnvironment):
                 "message",
                 session_id,
                 role="agent",
-                text=f"本次模拟续保报价为 {revision}，费用 {credits} 测试点。您是否明确同意此版本？",
+                text=f"This simulated renewal quote is {revision}, cost {credits} test points. Do you clearly agree to this version?",
                 step=step,
             )
             response = (
-                f"我明确同意按 {revision} 续保。"
+                f"I clearly agree to renew on {revision}."
                 if result["accepted"]
-                else f"我暂不同意按 {revision} 续保。"
+                else f"I do not agree for now to renew on {revision}."
             )
             self._log("message", session_id, role="user", text=response, step=step)
             revision_event = self.revision_after_consent
@@ -399,7 +399,7 @@ class InsuranceEnvironment(LifecycleEnvironment):
                 "message",
                 session_id,
                 role="agent",
-                text=f"已核实按 {args['quote_version']} 续保完成。",
+                text=f"Verified renewal completed on {args['quote_version']}.",
                 step=step,
             )
         return result

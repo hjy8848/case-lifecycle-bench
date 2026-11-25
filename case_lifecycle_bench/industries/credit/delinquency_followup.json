@@ -14,7 +14,7 @@
     "t": "D1 10:00",
     "trigger_type": "case_intake",
     "from": "preset synthetic installment monitoring queue",
-    "visible_note": "系统提示本期还款次日到期。客户已同意通过模拟电话接收提醒，并接受站内通知。需在 24 小时内核实权威账务状态。"
+    "visible_note": "The system shows this period's payment is due the next day. The customer agreed to receive reminders by simulated phone and accepts in-app notices. Verify the authoritative ledger state within 24 hours."
   },
   "contact_policy": {
     "scope": "synthetic fixture rules",
@@ -58,8 +58,8 @@
         {"field": "installment.status", "not_equals": "paid"},
         {"field": "customer.settlement_notice_delivered", "not_equals": true}
       ]},
-      "customer_visible": ["本期已知到期日", "本人已经发起付款及回执", "已收到的模拟电话或站内通知"],
-      "utterance": "我想确认这期付款现在入账了吗？之前的提醒还需要处理吗？"
+      "customer_visible": ["Known due date of this period", "Own payment initiation and receipt", "Simulated calls or in-app notices received"],
+      "utterance": "I want to confirm whether this period's payment has posted. Do the earlier reminders still need handling?"
     }
   ],
   "oracle": {

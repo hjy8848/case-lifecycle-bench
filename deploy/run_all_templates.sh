@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 # Run every card template against the model replicas on this machine, Poll-only, with the
 # simulated (LLM) customer, plus the P7 and unchanged-review instances. The scripted customer is a
 # control (MODES="llm script"): it puts the customer's intent into tool results.

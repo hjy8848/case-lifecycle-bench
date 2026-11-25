@@ -18,7 +18,7 @@ class CustomerSimulatorTest(unittest.TestCase):
         case = t2_case()
         gateway = ScriptedGateway(
             [
-                {"content": "请问确认为您办理全额退款 ¥312.40 吗？"},
+                {"content": "Do you confirm a full refund of $312.40?"},
                 {"content": "###CONFIRMED###"},
                 {
                     "tool_calls": [
@@ -31,7 +31,7 @@ class CustomerSimulatorTest(unittest.TestCase):
                         }
                     ]
                 },
-                {"content": "已提交退款申请，等待支付网关处理。"},
+                {"content": "Refund request submitted, waiting for the payment gateway."},
                 {"content": "CONFIRMED"},
             ]
         )
@@ -40,7 +40,7 @@ class CustomerSimulatorTest(unittest.TestCase):
         authorization = next(
             row
             for row in trace
-            if row.get("role") == "user" and row["text"] == "确认，同意办理这笔退款。"
+            if row.get("role") == "user" and row["text"] == "Confirmed, I agree to process this refund."
         )
         refund = next(row for row in trace if row.get("tool") == "issue_refund")
         self.assertLess(authorization["seq"], refund["seq"])
@@ -51,10 +51,10 @@ class CustomerSimulatorTest(unittest.TestCase):
     def test_confirmation_recovery_is_limited_to_direct_refund_authorization(self):
         visit = t2_case()["visits"][0]
         for agent_text, expected in (
-            ("请确认退款。", "确认，同意办理这笔退款。"),
-            ("请确认退款是否到账。", "CONFIRMED"),
-            ("退款申请已提交。请确认能否先安排退货。", "CONFIRMED"),
-            ("请确认退款并支付手续费。", "CONFIRMED"),
+            ("Please confirm the refund.", "Confirmed, I agree to process this refund."),
+            ("Please confirm whether the refund has arrived.", "CONFIRMED"),
+            ("The refund request was submitted. Please confirm whether the return can be arranged first.", "CONFIRMED"),
+            ("Please confirm the refund and pay the fee.", "CONFIRMED"),
         ):
             with self.subTest(agent_text=agent_text):
                 gateway = ScriptedGateway([{"content": "CONFIRMED"}])
@@ -64,5 +64,5 @@ class CustomerSimulatorTest(unittest.TestCase):
                 self.assertEqual(reply, expected)
 
         gateway = ScriptedGateway([{"content": "UNRESOLVED"}])
-        reply = _customer_reply(gateway, "customer", visit, [{"agent": "请确认退款。"}])
+        reply = _customer_reply(gateway, "customer", visit, [{"agent": "Please confirm the refund."}])
         self.assertEqual(reply, "UNRESOLVED")

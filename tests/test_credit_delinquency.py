@@ -234,7 +234,7 @@ class CounterexampleTest(unittest.TestCase):
         def say_settled(session, call):
             result = l1.oracle(session, call)
             if session["trigger_type"] == "user_visit":
-                call("say", text="您的款项已入账，欠款已结清。")
+                call("say", text="Your payment has been posted and the balance is settled.")
             return result
 
         case = cases("resolved")[0]
@@ -277,9 +277,9 @@ class CallConversationTest(unittest.TestCase):
         say = lambda result: {  # noqa: E731
             "tool": "say_to_customer", "args": {"contact_id": "C1"}, "result": result
         }
-        self.assertEqual(call_outcomes([start, say({"delivered": True, "customer_says": "嗯"})]), [False])
+        self.assertEqual(call_outcomes([start, say({"delivered": True, "customer_says": "Mm"})]), [False])
         self.assertEqual(
-            call_outcomes([start, say({"delivered": True, "customer_says": "嗯"}), say({"delivered": True, "call_ended": True})]),
+            call_outcomes([start, say({"delivered": True, "customer_says": "Mm"}), say({"delivered": True, "call_ended": True})]),
             [True],
         )
         self.assertEqual(call_outcomes([start, say({"delivered": True})]), [True])
@@ -298,12 +298,12 @@ class SettlementClaimTest(unittest.TestCase):
     def test_done_statements_are_claims_and_clearing_notices_are_not(self):
         self.assertEqual(
             self.claims(
-                "您的款项已入账，欠款已结清。",
-                "您的还款正在清算中，入账后我们会通知您。",
-                "目前尚未入账，请耐心等待。",
-                "已核实还款入账，感谢配合。",
+                "Your payment has been posted and the balance is settled.",
+                "Your payment is being cleared; we will notify you once it posts.",
+                "It has not posted yet, please wait.",
+                "We verified the payment has been posted. Thank you.",
             ),
-            [0],
+            [0, 3],
         )
 
 

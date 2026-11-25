@@ -47,9 +47,9 @@ class SmokeTest(unittest.TestCase):
                 self.messages = []
                 self.replies = iter(
                     [
-                        {"content": "请确认是否取消。"},
-                        {"content": "确认取消。"},
-                        {"content": "我会处理。"},
+                        {"content": "Please confirm whether to cancel."},
+                        {"content": "Confirm the cancellation."},
+                        {"content": "I will handle it."},
                         {"content": "LEFT"},
                     ]
                 )
@@ -71,7 +71,7 @@ class SmokeTest(unittest.TestCase):
         self.assertNotIn(case["visits"][0]["goal"], str(agent_messages))
         self.assertTrue(
             any(
-                row.get("role") == "user" and row.get("text") == "确认取消。"
+                row.get("role") == "user" and row.get("text") == "Confirm the cancellation."
                 for row in run["trajectory"]
             )
         )

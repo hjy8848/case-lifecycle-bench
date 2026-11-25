@@ -23,7 +23,7 @@ TEMPLATE = "credit_delinquency_followup"
 # The card's decoys are "I already paid" and "why are you still chasing me", not a demand
 # for a human. A simulated customer that asks for one makes the agent hand over for a
 # reason the card never planned.
-NO_HUMAN_REQUEST = "你不会要求转人工、主管，也不会提出投诉。"
+NO_HUMAN_REQUEST = "You will not ask for a human, a supervisor, or file a complaint."
 _HORIZON = "D6 18:00"
 _RECHECK_HOUR = 11  # a payment posts within one business day, by 10:30 in the fixture
 _CRM_NAMES = {
@@ -110,7 +110,7 @@ TOOLS = [
 ]
 
 _SETTLED = {
-    "settled": r"已入账|已结清|已还清|已全部还清|款项已到账|还款已到账|已到账",
+    "settled": r"(?i)has been posted|is posted|(?:is|has been|have been) (?:settled|cleared)|fully paid|paid off|payment (?:has been |was )?(?:received|credited)|has arrived|(?:debt|balance) (?:is )?(?:cleared|settled)",
 }
 
 
@@ -127,19 +127,19 @@ def _shift(label: str, **delta) -> str:
 
 def _human(label: str) -> str:
     moment = _case_time(label)
-    return f"{moment.month}月{moment.day}日{moment:%H:%M}"
+    return f"{moment:%B} {moment.day} at {moment:%H:%M}"
 
 
 def _contact(promise: str | None) -> dict:
     """One answered call: the scripted promise and the persona that voices it."""
     persona = (
-        "你是一位贷款逾期 3 天的客户，正在接听贷款服务的来电，对方核验身份时你会配合。"
+        "You are a customer whose loan payment is 3 days overdue, and you are taking a call from the loan service. You cooperate when they verify your identity. "
         + (
-            f"被问到还款安排时，你明确说会在 {_human(promise)} 前还款，并且只说这一个时间。"
+            f"When asked about a repayment plan, you clearly say you will repay before {_human(promise)}, and you give only that one time."
             if promise
-            else "被问到还款安排时，你说暂时还不能确定还款时间。"
+            else "When asked about a repayment plan, you say you cannot yet commit to a repayment time."
         )
-        + "你不会主动提出其他要求，对方说完事情后你可以结束通话。"
+        + " You do not raise any other requests on your own; once they have finished, you may end the call."
     )
     return {
         "answers": True,
@@ -183,14 +183,14 @@ def generate(seed: int) -> dict:
                 "channel": "secure_chat",
                 "utterance": rng.choice(
                     (
-                        "我已经还了，别再催了。",
-                        "钱我已经转过去了，你们不用再提醒我了。",
+                        "I already paid, stop chasing me.",
+                        "I have already transferred the money, you do not need to remind me anymore.",
                     )
                 ),
-                "goal": "刚还完款，要求不要再被催，想确认状态。",
+                "goal": "You just made the payment, want no more reminders, and want to confirm the status.",
             }
         )
-        revisit = "我都还了你们怎么还在催？到底入账了没有？"
+        revisit = "I already paid, so why are you still chasing me? Has it been posted or not?"
     elif variant == "wait":
         promise = rng.choice(("D3 12:00", "D3 16:00", "D3 18:00"))
         second = "D6 18:00"
@@ -204,18 +204,18 @@ def generate(seed: int) -> dict:
                 "id": "V2",
                 "t": "D6 17:00",
                 "channel": "secure_chat",
-                "utterance": "我刚还了款，别再催了，到账了吗？",
-                "goal": "刚还完款，要求不要再被催，想确认状态。",
+                "utterance": "I just paid, stop chasing me. Has it arrived?",
+                "goal": "You just made the payment, want no more reminders, and want to confirm the status.",
             }
         )
-        revisit = "我想确认一下这笔欠款现在是什么情况，之前的提醒还要继续吗？"
+        revisit = "I would like to confirm where this debt stands now. Do the earlier reminders still continue?"
     else:
         promise = rng.choice(("D3 12:00", "D3 16:00", "D3 18:00"))
         second = rng.choice(("D5 12:00", "D5 16:00"))
         contacts = [_contact(promise), _contact(second)]
         event("E1", promise, "promise_deadline", "credit.promise_check", n=1)
         event("E2", second, "promise_deadline", "credit.promise_check", n=2)
-        revisit = "我想确认一下这笔欠款现在是什么情况，之前的提醒还要继续吗？"
+        revisit = "I would like to confirm where this debt stands now. Do the earlier reminders still continue?"
     visits.append(
         {
             "id": "V1",
@@ -223,7 +223,7 @@ def generate(seed: int) -> dict:
             "channel": "secure_chat",
             "condition": {"no_message_after_event": "E3" if variant == "resolved" else "E1"},
             "utterance": revisit,
-            "goal": "想知道还款和提醒的最新情况。",
+            "goal": "You want to know the latest on the payment and the reminders.",
         }
     )
     visits.sort(key=lambda row: _case_time(row["t"]))
@@ -258,7 +258,7 @@ def generate(seed: int) -> dict:
         },
         "intake": {
             "t": "D1 10:00",
-            "note": "客户本期贷款已逾期 3 天，请联系客户并跟进到入账。",
+            "note": "The customer's loan payment is 3 days overdue; contact the customer and follow up until it posts.",
         },
         "events": events,
         "visits": visits,
@@ -379,7 +379,7 @@ def _run(
     ticket_id = (
         tickets[0]["ticket_id"]
         if tickets
-        else call("create_ticket", user_id=user_id, summary="逾期提醒与还款承诺跟进", **subject)
+        else call("create_ticket", user_id=user_id, summary="Overdue reminder and repayment promise follow-up", **subject)
     )
 
     def phone():
@@ -394,9 +394,9 @@ def _run(
         promised = told.get("commitment_offered_by")
         if promised:
             call("record_repayment_commitment", contact_id=contact_id, promised_by=promised)
-            call("add_ticket_note", ticket_id=ticket_id, text=f"Commitment: 客户承诺 {promised} 前还款，到期后核实。")
+            call("add_ticket_note", ticket_id=ticket_id, text=f"Commitment: customer promised to repay before {promised}, verify after it falls due.")
             due = datetime.fromisoformat(promised) + timedelta(minutes=30)
-            call("schedule_followup", ticket_id=ticket_id, due_at=_iso(due), note="核实还款承诺")
+            call("schedule_followup", ticket_id=ticket_id, due_at=_iso(due), note="Verify the repayment promise")
 
     if kind == "case_intake":
         call("read_installment", **subject)
@@ -421,19 +421,19 @@ def _run(
     if ticket["status"] == "closed":
         return "CONFIRMED" if visit else None
     if status == "posted":
-        tell("已核实您的还款已入账，本期欠款已结清，感谢您的配合。")
+        tell("We have verified that your payment has been posted and this period's balance is settled. Thank you for your cooperation.")
         for task in call("list_followups", ticket_id=ticket_id):
             if task["status"] == "pending":
                 call("cancel_followup", task_id=task["task_id"])
         call("close_ticket", ticket_id=ticket_id, resolution_code="settled")
     elif status == "clearing":
         if false_settlement:
-            tell("您的款项已入账，欠款已结清。")
+            tell("Your payment has been posted and the balance is settled.")
             call("close_ticket", ticket_id=ticket_id, resolution_code="settled")
             return "CONFIRMED" if visit else None
-        if visit or "清算中已告知" not in notes:
-            tell("您的还款正在清算中，入账最长需要一个工作日，入账后我们会通知您，暂时不需要再处理。")
-            call("add_ticket_note", ticket_id=ticket_id, text="清算中已告知客户，待入账后通知并关单。")
+        if visit or "clearing-notified" not in notes:
+            tell("Your payment is being cleared, which takes up to one business day. We will notify you once it posts; you do not need to do anything for now.")
+            call("add_ticket_note", ticket_id=ticket_id, text="clearing-notified: customer told the repayment is clearing; notify and close once it posts.")
         target = _recheck_time(session)
         pending = [
             task
@@ -441,19 +441,19 @@ def _run(
             if task["status"] == "pending" and task["due_at"] >= target
         ]
         if not pending:
-            call("schedule_followup", ticket_id=ticket_id, due_at=target, note="核实还款是否入账")
-    elif broken == 1 and "已发提醒" not in notes:
-        call("add_ticket_note", ticket_id=ticket_id, text="第一次还款承诺落空，已发提醒。")
+            call("schedule_followup", ticket_id=ticket_id, due_at=target, note="Check whether the payment has posted")
+    elif broken == 1 and "reminder-sent" not in notes:
+        call("add_ticket_note", ticket_id=ticket_id, text="First repayment promise broken; reminder-sent.")
         phone()
-    elif broken >= 2 and "已转人工" not in notes:
-        tell("您的第二次还款承诺未兑现，我们已转交人工催收专员，由专员与您联系。")
-        call("escalate_to_human", ticket_id=ticket_id, note="两次还款承诺落空，转人工催收。")
-        call("add_ticket_note", ticket_id=ticket_id, text="两次承诺落空，已转人工催收。")
+    elif broken >= 2 and "handed-to-human" not in notes:
+        tell("Your second repayment promise was not kept, so we have passed your case to a human collections specialist, who will contact you.")
+        call("escalate_to_human", ticket_id=ticket_id, note="Two repayment promises broken; handing over to human collections.")
+        call("add_ticket_note", ticket_id=ticket_id, text="Two promises broken; handed-to-human collections.")
         for task in call("list_followups", ticket_id=ticket_id):
             if task["status"] == "pending":
                 call("cancel_followup", task_id=task["task_id"])
     elif visit:
-        call("say", text="目前系统显示仍待还款，已记录您的还款安排，到期后我们会核实。")
+        call("say", text="The system still shows a payment due. We have recorded your repayment plan and will verify it once it falls due.")
     return "CONFIRMED" if visit else None
 
 
@@ -481,8 +481,8 @@ def close_early(session, call):
     if session["trigger_type"] != "case_intake":
         return "CONFIRMED" if session["trigger_type"] == "user_visit" else None
     user_id, subject = session["user_id"], {"subject_id": session["subject_id"]}
-    ticket_id = call("create_ticket", user_id=user_id, summary="逾期提醒", **subject)
-    call("send_message_to_user", user_id=user_id, channel="secure_inbox", text="您的欠款已结清，问题已解决。")
+    ticket_id = call("create_ticket", user_id=user_id, summary="Overdue reminder", **subject)
+    call("send_message_to_user", user_id=user_id, channel="secure_inbox", text="Your balance is settled and the matter is resolved.")
     call("close_ticket", ticket_id=ticket_id, resolution_code="settled")
     return None
 
@@ -730,7 +730,7 @@ for _name, _agent in AGENTS.items():
 DELINQUENCY = ServicingTemplate(
     industry="credit",
     template=TEMPLATE,
-    title="逾期提醒与还款承诺跟进",
+    title="Overdue reminder and repayment promise follow-up",
     generate=generate,
     environment=DelinquencyEnvironment,
     evaluate=evaluate,

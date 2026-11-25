@@ -178,9 +178,10 @@ TOOLS = [
 ]
 SIGNALS = {"CONFIRMED", "LEFT", "UNRESOLVED"}
 _REFUND_AUTHORIZATION_REQUEST = re.compile(
-    r"(?:^|[。！？!?\n])\s*(?:请(?:问)?您?(?:是否)?|您?是否)(?:确认|同意)"
-    r"(?:您|是否|同意|为您|为该订单|办理|发起|提交|申请|这笔|该笔|全额|\s)*退款"
-    r"\s*(?:[¥￥$]\s*[\d,.]+|[\d,.]+\s*元)?\s*(?:吗|么)?\s*(?=$|[。！？!?\n])"
+    r"(?i)(?:^|[.!?\n])\s*(?:please\s+)?(?:(?:do|would|can|could)\s+you\s+)?"
+    r"(?:confirm|agree\s+to|approve|authorize)\s+"
+    r"(?:(?:the|a|this|that|your|full|an|processing|issuing|submitting|requesting)\s+)*refund"
+    r"(?:\s+(?:of\s+)?[$\u00a5]?\s*[\d,.]+)?\s*\??\s*(?=$|[.!?\n])"
 )
 
 
@@ -235,13 +236,13 @@ class ChatGateway:
 
 def _customer_reply(gateway, model, visit, dialogue):
     prompt = (
-        "Simulate one customer visit in Chinese. Use only the visit's goal, opening "
+        "Simulate one customer visit in English. Use only the visit's goal, opening "
         "message, observable facts and authorization reply if provided. Respond to the "
         "latest support reply as the customer. Keep the scenario instructions private. "
         "When you lack a requested identifier, explain that in ordinary customer language. "
         "If support asks for your confirmation "
-        "or authorization and you agree, give explicit consent in Chinese so support "
-        "can continue. For example, reply '确认，同意办理这笔退款。' to authorize the "
+        "or authorization and you agree, give explicit consent in English so support "
+        "can continue. For example, reply 'Confirmed, I agree to process this refund.' to authorize the "
         "requested refund. If the visit defines refund_authorization_reply, use it only "
         "to authorize that refund. A terminal token never grants authorization. Return "
         "exactly one token only when you are ending the conversation: "

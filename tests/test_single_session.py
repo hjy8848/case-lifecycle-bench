@@ -73,7 +73,7 @@ class T3PairedSessionTest(unittest.TestCase):
                 "schedule_followup",
                 ticket_id=ticket["ticket_id"],
                 due_at="2026-01-06T10:00:00",
-                note="再次核实退款。",
+                note="Verify the refund again.",
             )
             return signal
 

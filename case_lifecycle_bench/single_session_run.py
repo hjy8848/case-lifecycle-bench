@@ -2,7 +2,7 @@
 
 The same Case, the same tools, the same rules, the same world events, but the whole Case is
 one continuous conversation. The clock moves on; events arrive as system messages in the
-conversation ("[系统] 现在是 D3 14:00，..."); a customer who arrives chats in the same
+conversation ("[System] The time is now 2026-01-07T14:00, ..."); a customer who arrives chats in the same
 conversation. The agent is online all the time and keeps its whole context, so it has no
 sessions to bridge and nothing to wake. It has no schedule_followup, and it lets time pass
 with wait_until. The time rules (intervals, limits) run on the advanced clock as usual and
@@ -40,25 +40,25 @@ _WAIT = _tool(
 )
 _SETTING = (
     "This Case runs as one continuous conversation. You stay online the whole time and keep everything you have "
-    "seen. The system tells you, in messages starting with [系统], when time has passed, when something "
+    "seen. The system tells you, in messages starting with [System], when time has passed, when something "
     "happens and when a customer arrives. There are no later wakes and you do not schedule follow-ups: when "
     "there is nothing to do now, call wait_until with the time you want to look again, or end_session when "
     "you are done. Every time rule in the Policy runs on the clock the system shows."
 )
 _OPS = {
-    "part_arrived": "配件到货",
-    "promise_deadline": "客户承诺的还款时间已到",
-    "payment_posted": "有一笔款项入账",
-    "payment_initiated": "客户发起了一笔还款",
-    "decision": "审批中心有结论",
-    "status_ping": "系统有状态更新",
-    "review_ping": "系统有状态更新",
+    "part_arrived": "The part arrived",
+    "promise_deadline": "The customer's promised repayment time has come",
+    "payment_posted": "A payment was posted",
+    "payment_initiated": "The customer initiated a payment",
+    "decision": "The approval center has a conclusion",
+    "status_ping": "A system status update",
+    "review_ping": "A system status update",
 }
 _MAX_TURNS = 600
 
 
 def describe(event: dict) -> str:
-    return _OPS.get(event.get("op"), f"系统有新的状态更新（{event.get('op')}）")
+    return _OPS.get(event.get("op"), f"A new system status update ({event.get('op')})")
 
 
 def _label(t: datetime) -> str:
@@ -82,7 +82,7 @@ def single_session_agent(env, gateway, model, user_gateway, user_model, policy, 
                 env._world_event(payload)
                 row = env.trace[-1]
                 if row["kind"] == "world_event" and row.get("notify_agent") and row.get("changes"):
-                    return f"[系统] 现在是 {_label(t)}，{describe(payload)}。"
+                    return f"[System] The time is now {_label(t)}. {describe(payload)}."
                 continue
             if priority == _PUSH or priority != _VISIT:
                 continue
@@ -93,7 +93,7 @@ def single_session_agent(env, gateway, model, user_gateway, user_model, policy, 
             return ("visit", payload, session)
         if limit is not None and env.t < limit <= env.horizon:
             env.t = limit
-            return f"[系统] 现在是 {_label(env.t)}。"
+            return f"[System] The time is now {_label(env.t)}."
         return None
 
     def agent(session, call):
@@ -101,7 +101,7 @@ def single_session_agent(env, gateway, model, user_gateway, user_model, policy, 
         messages = [
             {"role": "system", "content": f"{policy}\n{_SETTING}"},
             {"role": "user", "content": json.dumps(context, ensure_ascii=False)},
-            {"role": "user", "content": f"[系统] 现在是 {_label(env.t)}。{session.get('note', '')}"},
+            {"role": "user", "content": f"[System] The time is now {_label(env.t)}.{session.get('note', '')}"},
         ]
         visit, dialogue = None, []
         for _ in range(_MAX_TURNS):
@@ -159,7 +159,7 @@ def single_session_agent(env, gateway, model, user_gateway, user_model, policy, 
                 visit, dialogue = payload, [{"customer": arrival["message"]}]
                 env._log("message", "S1", role="user", text=arrival["message"], step=0)
                 moved = (
-                    f"[系统] 现在是 {_label(env.t)}，客户在{payload['channel']}来访，客户说：{arrival['message']}"
+                    f"[System] The time is now {_label(env.t)}. A customer arrived on {payload['channel']} and said: {arrival['message']}"
                 )
             messages.append({"role": "user", "content": moved})
         return None

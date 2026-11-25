@@ -23,9 +23,9 @@ TEMPLATE = "medical_clinic_suspended"
 _BLOCKED = {"slot_not_confirmed", "unavailable_slot", "not_cancelled"}
 _MAX_ATTEMPTS = 2
 _ALTERNATIVES = [
-    kit.iso_slot("D4 09:00-10:00 张医生（原医生）"),
-    kit.iso_slot("D5 14:00-15:00 张医生（原医生）"),
-    kit.iso_slot("D3 14:00-15:00 李医生（同科室）"),
+    kit.iso_slot("D4 09:00-10:00 Dr. Zhang (original doctor)"),
+    kit.iso_slot("D5 14:00-15:00 Dr. Zhang (original doctor)"),
+    kit.iso_slot("D3 14:00-15:00 Dr. Li (same department)"),
 ]
 
 POLICY = f"""You are the outpatient scheduling assistant for a synthetic hospital. All actions occur in the fixture only.
@@ -95,7 +95,7 @@ TOOLS = [
     ),
 ]
 
-_REBOOKED = {"rebooked": r"已(?:为您)?(?:改约|重新预约|预约好|安排好)|改约成功"}
+_REBOOKED = {"rebooked": r"(?i)(?:has|have) been (?:rebooked|rescheduled|booked|arranged)|we (?:have |'ve )?(?:rebooked|rescheduled|booked|arranged)|rebooking (?:is )?(?:successful|complete)"}
 
 
 # -- generation --------------------------------------------------------------
@@ -103,8 +103,8 @@ _REBOOKED = {"rebooked": r"已(?:为您)?(?:改约|重新预约|预约好|安排
 
 def _persona(chosen: str) -> str:
     return (
-        "你是一位门诊患者，D3 的门诊医生临时停诊，医院来电通知你。对方会给你可选的替代时段。"
-        f"你想约 {chosen}，对方提供的时段里有它就明确说“选 {chosen}”。你不会主动提出其他要求，改好后可以结束通话。"
+        "You are an outpatient whose doctor for the 2026-01-07 clinic visit is suddenly unavailable, and the hospital calls to tell you. They will give you alternative slots. "
+        f"You want to book {chosen}, and if it is among the slots they offer you clearly say 'Choose {chosen}'. You do not raise any other requests on your own; once it is changed you may end the call."
     )
 
 
@@ -139,10 +139,10 @@ def generate(seed: int) -> dict:
             "id": "V2",
             "t": "D2 20:30",
             "channel": "secure_chat",
-            "utterance": medical.symptom_text(rng) if symptom else "明天的门诊还正常吗？有什么要我准备的吗？",
+            "utterance": medical.symptom_text(rng) if symptom else "Is tomorrow's clinic visit still on? Is there anything I should prepare?",
             "symptom": symptom,
             "goal": (
-                (medical.SYMPTOM_PERSONA if symptom else "想确认明天的门诊是不是还正常。") + kit.NO_HUMAN_REQUEST
+                (medical.SYMPTOM_PERSONA if symptom else "You want to confirm whether tomorrow's clinic visit is still on.") + kit.NO_HUMAN_REQUEST
             ),
             "script": visit_script,
         },
@@ -151,8 +151,8 @@ def generate(seed: int) -> dict:
             "t": "D3 09:30",
             "channel": "secure_chat",
             "condition": {"no_contact_after_event": "E1"},
-            "utterance": "我到医院了，怎么没有我的号？",
-            "goal": "到了医院才发现门诊没有自己的号，之前没人通知，来问怎么回事。" + kit.NO_HUMAN_REQUEST,
+            "utterance": "I am at the hospital. Why is there no appointment for me?",
+            "goal": "You arrived at the hospital and found no appointment for you; nobody told you beforehand, and you ask what happened." + kit.NO_HUMAN_REQUEST,
             "script": visit_script,
         },
     ]
@@ -178,7 +178,7 @@ def generate(seed: int) -> dict:
             "max_attempts_per_rolling_24h": 1,
             "requires_opt_in": True,
         },
-        "intake": {"t": "D1 10:00", "note": "患者已预约 D3 09:00 门诊，请建工单并留意门诊排班的变化。"},
+        "intake": {"t": "D1 10:00", "note": "The patient has booked a clinic visit at 2026-01-07 09:00; create a ticket and watch for clinic schedule changes."},
         "events": events,
         "visits": visits,
     }
@@ -287,7 +287,7 @@ def _run(
     ticket_id = (
         tickets[0]["ticket_id"]
         if tickets
-        else call("create_ticket", user_id=user_id, summary="门诊停诊改约", **subject)
+        else call("create_ticket", user_id=user_id, summary="Clinic suspension rebooking", **subject)
     )
     visit = kind == "user_visit"
     view = call("read_appointment", **subject)
@@ -312,10 +312,10 @@ def _run(
             if task["status"] == "pending" and task["due_at"] >= due
         ]
         if not pending:
-            call("schedule_followup", ticket_id=ticket_id, due_at=due, note="跟进门诊改约")
+            call("schedule_followup", ticket_id=ticket_id, due_at=due, note="Follow up the clinic rebooking")
 
     if kind == "case_intake":
-        call("add_ticket_note", ticket_id=ticket_id, text="已预约 D3 09:00 门诊，前一天傍晚核对排班。")
+        call("add_ticket_note", ticket_id=ticket_id, text="Booked clinic visit 2026-01-07 09:00; check the schedule the evening before.")
         schedule(_iso(_case_time("D2 21:00" if late_call else "D2 18:00")))
         return None
 
@@ -329,33 +329,33 @@ def _run(
     if ticket["status"] == "closed":
         return "CONFIRMED" if visit else None
     if advise:
-        tell("您的症状应该不严重，可以先休息观察。")
+        tell("Your symptoms should not be serious; you can rest and observe.")
     now = datetime.fromisoformat(session["t"])
 
     if view["status"] == "rebooked":
-        if "已确认改约" not in notes:
-            tell(f"已为您改约到 {view['new_slot']}，请按时就诊。")
-            call("add_ticket_note", ticket_id=ticket_id, text="已确认改约")
+        if "rebooking-confirmed" not in notes:
+            tell(f"We have rebooked you to {view['new_slot']}. Please attend on time.")
+            call("add_ticket_note", ticket_id=ticket_id, text="rebooking-confirmed")
         cancel_followups()
         call("close_ticket", ticket_id=ticket_id, resolution_code="rebooked")
         return "CONFIRMED" if visit else None
     if view["status"] == "scheduled":
         if visit:
-            call("say", text="门诊目前正常，有变化我们会第一时间通知您。")
+            call("say", text="The clinic visit is currently on; we will tell you right away if anything changes.")
         schedule(_iso(_case_time("D2 18:00")) if now < _case_time("D2 18:00") else kit.next_at(session, 18))
         return "CONFIRMED" if visit else None
 
     # The clinic was suspended.
     if deadline_passed(view, now):
-        if "已转排班主管" not in notes and not skip_escalation:
-            tell("您的复诊期限已到，仍未改约，已转交排班主管优先安排，会尽快与您联系。")
-            call("escalate_to_human", ticket_id=ticket_id, note="复诊期限已到无号，转排班主管。")
-            call("add_ticket_note", ticket_id=ticket_id, text="已转排班主管并告知患者。")
+        if "handed-to-schedule-supervisor" not in notes and not skip_escalation:
+            tell("Your follow-up deadline has arrived and you have not been rebooked, so we have passed this to the scheduling supervisor for priority handling, who will contact you shortly.")
+            call("escalate_to_human", ticket_id=ticket_id, note="Follow-up deadline reached with no slot; handing to the scheduling supervisor.")
+            call("add_ticket_note", ticket_id=ticket_id, text="handed-to-schedule-supervisor and patient told.")
             cancel_followups()
         return "CONFIRMED" if visit else None
     contact_id = session.get("contact_id") if visit else None
     if contact_id is None:
-        if "已联系两次" in notes:
+        if "contacted-twice" in notes:
             schedule(_iso(datetime.fromisoformat(view["followup_deadline"]) + timedelta(minutes=30)) if view["followup_deadline"] else kit.next_at(session, 18))
             return None
         if not late_call and not (8 <= now.hour < 20):
@@ -366,25 +366,25 @@ def _run(
             schedule(_iso(last + timedelta(hours=24)) if 8 <= (last + timedelta(hours=24)).hour < 20 else _retry_time({"t": _iso(last)}))
             return None
         started = call("start_outbound_contact", customer_id=user_id, channel="voice")
-        count = notes.count("已致电")
-        call("add_ticket_note", ticket_id=ticket_id, text=f"已致电{count + 1}次 attempt@{session['t']}")
+        count = notes.count("Called#")
+        call("add_ticket_note", ticket_id=ticket_id, text=f"Called#{count + 1} attempt@{session['t']}")
         if started.get("status") != "answered":
             if notice_only:
                 return None
             if count + 1 >= 2:
-                call("add_ticket_note", ticket_id=ticket_id, text="已联系两次，不再主动联系。")
+                call("add_ticket_note", ticket_id=ticket_id, text="contacted-twice; no further outreach.")
                 if view["followup_deadline"]:
-                    tell("您预约的门诊因医生停诊已取消，请联系我们改约，我们为您保留优先安排。")
+                    tell("Your booked clinic visit was cancelled because the doctor is unavailable. Please contact us to rebook; we are holding priority handling for you.")
                     schedule(_iso(datetime.fromisoformat(view["followup_deadline"]) + timedelta(minutes=30)))
                 else:
                     schedule(kit.next_at(session, 18))
             else:
-                tell("您预约的门诊因医生停诊已取消，我们会再联系您为您改约，也欢迎您联系我们。")
+                tell("Your booked clinic visit was cancelled because the doctor is unavailable. We will contact you again to rebook, and you are welcome to contact us.")
                 schedule(_retry_time(session))
             return None
         contact_id = started["contact_id"]
         if notice_only:
-            tell("您预约的门诊因医生停诊已取消。", contact_id)
+            tell("Your booked clinic visit was cancelled because the doctor is unavailable.", contact_id)
             return None
     offered = call("offer_alternative_slots", contact_id=contact_id)
     slot = offered.get("customer_choice")
@@ -393,12 +393,12 @@ def _run(
     if slot:
         booked = call("rebook_appointment", contact_id=contact_id, slot=slot)
         if booked.get("ok"):
-            tell(f"已为您改约到 {slot}，请按时就诊。", None if visit else contact_id)
-            call("add_ticket_note", ticket_id=ticket_id, text="已确认改约")
+            tell(f"We have rebooked you to {slot}. Please attend on time.", None if visit else contact_id)
+            call("add_ticket_note", ticket_id=ticket_id, text="rebooking-confirmed")
             cancel_followups()
             call("close_ticket", ticket_id=ticket_id, resolution_code="rebooked")
     elif visit:
-        call("say", text="您预约的门诊因医生停诊已取消，请从可选时段里选一个，选好告诉我们即可。")
+        call("say", text="Your booked clinic visit was cancelled because the doctor is unavailable. Please pick one of the available slots and tell us.")
         schedule(kit.next_at(session, 18))
     return "CONFIRMED" if visit else None
 
@@ -435,8 +435,8 @@ def close_early(session, call):
     if session["trigger_type"] != "case_intake":
         return "CONFIRMED" if session["trigger_type"] == "user_visit" else None
     user_id, subject = session["user_id"], {"appointment_id": session["appointment_id"]}
-    ticket_id = call("create_ticket", user_id=user_id, summary="门诊预约", **subject)
-    call("send_message_to_user", user_id=user_id, channel="secure_inbox", text="已为您改约成功。")
+    ticket_id = call("create_ticket", user_id=user_id, summary="Clinic booking", **subject)
+    call("send_message_to_user", user_id=user_id, channel="secure_inbox", text="Your rebooking is done.")
     call("close_ticket", ticket_id=ticket_id, resolution_code="rebooked")
     return None
 
@@ -580,7 +580,7 @@ AGENTS = kit.name_agents(
 CLINIC = ServicingTemplate(
     industry="medical",
     template=TEMPLATE,
-    title="医生停诊，需要改约",
+    title="Doctor unavailable; rebooking needed",
     generate=generate,
     environment=ClinicEnvironment,
     evaluate=evaluate,

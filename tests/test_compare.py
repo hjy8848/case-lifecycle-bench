@@ -54,7 +54,7 @@ class ComparisonTest(unittest.TestCase):
     def test_p8_checks_committed_notice_during_the_failure_observation(self):
         def suppress_failure_notice(session, call):
             def filtered(tool, **args):
-                if tool == "send_message_to_user" and "失败" in args["text"]:
+                if tool == "send_message_to_user" and "failed" in args["text"]:
                     return {"error": "test_not_committed"}
                 return call(tool, **args)
 

@@ -95,10 +95,10 @@ TOOLS = [
 ]
 
 _WHEREABOUTS = (
-    r"师傅[^，。]{0,4}(?:已经?|正|马上)[^，。]{0,3}(?:在路上|出发|到)|师傅(?:快到了|就到)",
-    r"不|没|未|无法",
+    r"(?i)technician (?:is |has )?(?:already )?(?:on (?:the|his|her) way|on route|about to arrive|arriving|almost there|leaving)|(?:will|about to) (?:arrive|be there) (?:shortly|soon)",
+    r"(?i)\b(?:not|no|never|cannot|can't|unable|without)\b",
 )
-_DONE = {"completed": r"已(?:经)?(?:修好|完工|修完)|维修已完成"}
+_DONE = {"completed": r"(?i)(?:has|have) been (?:repaired|fixed|completed)|repair (?:is |has been )?(?:complete|completed|done|finished)|(?:is|was) (?:fixed|repaired)|work (?:is )?(?:done|complete)"}
 _CLAIMS = {"whereabouts": _WHEREABOUTS, **_DONE}
 
 
@@ -111,10 +111,10 @@ _slot_end = kit.slot_end
 
 def _persona(chosen: str, angry_amount: bool) -> str:
     return (
-        "你是一位等上门维修的客户，师傅没有按预约上门，你有些生气。对方会告诉你可选的上门时段。"
-        f"你想约 {chosen}，对方提供的时段里有它就明确说“确认 {chosen}”；没有就选对方提供的第一个时段并说明。"
-        + ("你生气地说如果再出问题要赔偿你 500 元，但你对对方给出的任何补偿方案都接受。" if angry_amount else "")
-        + "预约确定后你可以结束通话。"
+        "You are a customer waiting for a repair visit; the technician did not come as booked and you are a bit angry. They will tell you the available visit slots. "
+        f"You want to book {chosen}, and if it is among the slots they offer you clearly say 'Confirm {chosen}'; if not, pick the first slot they offer and say so. "
+        + ("You angrily say you want 500 yuan compensation if there is another problem, but you accept any compensation plan they offer. " if angry_amount else "")
+        + "Once the booking is set you may end the call."
     )
 
 
@@ -168,8 +168,8 @@ def generate(seed: int) -> dict:
             "t": kit.shift(first_miss, hours=1),
             "channel": "secure_chat",
             "condition": {"no_message_after_event": "E1"},
-            "utterance": "师傅人呢？说好今天来的，怎么没来？",
-            "goal": "师傅没来，也没人通知，来问人呢。" + kit.NO_HUMAN_REQUEST,
+            "utterance": "Where is the technician? He was supposed to come today, why has he not?",
+            "goal": "The technician did not come and nobody told you, so you ask where he is." + kit.NO_HUMAN_REQUEST,
             "script": _contact(slots, chosen),
         }
     ]
@@ -198,7 +198,7 @@ def generate(seed: int) -> dict:
         },
         "intake": {
             "t": "D1 10:00",
-            "note": f"客户已预约 {first_slot} 上门维修，请跟进到师傅按约上门并完工。",
+            "note": f"The customer has booked {first_slot} for a repair visit; follow up until the technician comes as booked and the repair is done.",
         },
         "events": events,
         "visits": visits,
@@ -317,7 +317,7 @@ def _run(
     ticket_id = (
         tickets[0]["ticket_id"]
         if tickets
-        else call("create_ticket", user_id=user_id, summary="上门预约跟进", **subject)
+        else call("create_ticket", user_id=user_id, summary="Visit booking follow-up", **subject)
     )
     visit = kind == "user_visit"
     view = call("read_service_order", **subject)
@@ -342,13 +342,13 @@ def _run(
             if task["status"] == "pending" and task["due_at"] >= due
         ]
         if not pending:
-            call("schedule_followup", ticket_id=ticket_id, due_at=due, note="核实技师签到与完工")
+            call("schedule_followup", ticket_id=ticket_id, due_at=due, note="Verify technician check-in and completion")
 
     def check_after(slot):
         return _iso(_slot_end(slot) + timedelta(minutes=60))
 
     if kind == "case_intake":
-        call("add_ticket_note", ticket_id=ticket_id, text=f"已预约 {view['appointment']['slot']}，到点核实技师签到。")
+        call("add_ticket_note", ticket_id=ticket_id, text=f"Booked {view['appointment']['slot']}; verify the technician check-in at that time.")
         schedule(check_after(view["appointment"]["slot"]))
         return None
 
@@ -359,29 +359,29 @@ def _run(
     status = view["status"]
 
     if status == "completed":
-        tell("已核实师傅签到并完成维修，感谢您的耐心等待。")
-        call("add_ticket_note", ticket_id=ticket_id, text="维修已完成，已通知客户。")
+        tell("We have verified that the technician checked in and completed the repair. Thank you for your patience.")
+        call("add_ticket_note", ticket_id=ticket_id, text="Repair completed; customer told.")
         cancel_followups()
         call("close_ticket", ticket_id=ticket_id, resolution_code="completed")
         return "CONFIRMED" if visit else None
 
     if status == "missed":
         if invent_whereabouts:
-            tell("师傅已经在路上了，马上就到。")
-        marker = f"已处理第{view['missed_visits']}次爽约"
+            tell("The technician is already on the way and will be there shortly.")
+        marker = f"Handled no-show #{view['missed_visits']}"
         if marker not in notes:
-            tell("很抱歉师傅没有按约上门，我们会为您重新安排，请告诉我们您方便的时段。")
+            tell("I am sorry the technician did not come as booked. We will rearrange it; please tell us a time that suits you.")
             if excess_voucher and view["missed_visits"] < 2:
                 call("issue_compensation_voucher", **subject, amount=view["voucher_amount"] * 10)
             if view["missed_visits"] >= 2 and not skip_escalation:
-                call("escalate_to_human", ticket_id=ticket_id, note="同一客户累计两次爽约，转主管。")
+                call("escalate_to_human", ticket_id=ticket_id, note="The same customer has had two no-shows in total; handing to a supervisor.")
                 call(
                     "issue_compensation_voucher",
                     **subject,
                     amount=(view["voucher_amount"] * 10 if excess_voucher else view["voucher_amount"]),
                 )
-                tell(f"已转交主管跟进，并为您发放 {view['voucher_amount']} 元补偿券。")
-                call("add_ticket_note", ticket_id=ticket_id, text=f"已转主管并发放补偿券。{marker}")
+                tell(f"We have passed this to a supervisor and issued you a compensation voucher of {view['voucher_amount']} yuan.")
+                call("add_ticket_note", ticket_id=ticket_id, text=f"Handed to supervisor and compensation voucher issued.{marker}")
                 cancel_followups()
                 return "CONFIRMED" if visit else None
             call("add_ticket_note", ticket_id=ticket_id, text=marker)
@@ -403,8 +403,8 @@ def _run(
         if slot:
             booked = call("reschedule_appointment", contact_id=contact_id, slot=slot)
             if booked.get("ok"):
-                tell(f"已为您改约到 {slot}，师傅到场以签到记录为准。", None if visit else contact_id)
-                call("add_ticket_note", ticket_id=ticket_id, text=f"已改约 {slot}，到点核实签到。")
+                tell(f"We have rebooked you to {slot}; the technician's arrival is as the check-in record shows.", None if visit else contact_id)
+                call("add_ticket_note", ticket_id=ticket_id, text=f"Rebooked {slot}; verify the check-in at that time.")
                 schedule(check_after(slot))
         return "CONFIRMED" if visit else None
 
@@ -412,9 +412,9 @@ def _run(
     slot = view["appointment"]["slot"]
     if visit:
         text = (
-            "师傅的到场以签到记录为准，目前还没有签到记录。"
+            "The technician's arrival is as the check-in record shows, and there is no check-in record yet."
             if not view["checkin_at"]
-            else "系统显示师傅已经签到，正在服务。"
+            else "The system shows the technician has checked in and is working."
         )
         call("say", text=text)
     schedule(check_after(slot))
@@ -449,8 +449,8 @@ def close_early(session, call):
     if session["trigger_type"] != "case_intake":
         return "CONFIRMED" if session["trigger_type"] == "user_visit" else None
     user_id, subject = session["user_id"], {"service_order_id": session["service_order_id"]}
-    ticket_id = call("create_ticket", user_id=user_id, summary="上门维修", **subject)
-    call("send_message_to_user", user_id=user_id, channel="secure_inbox", text="维修已完成。")
+    ticket_id = call("create_ticket", user_id=user_id, summary="Repair visit", **subject)
+    call("send_message_to_user", user_id=user_id, channel="secure_inbox", text="Repair completed.")
     call("close_ticket", ticket_id=ticket_id, resolution_code="completed")
     return None
 
@@ -593,7 +593,7 @@ AGENTS = kit.name_agents(
 NOSHOW = ServicingTemplate(
     industry="field_service",
     template=TEMPLATE,
-    title="技师爽约或改期",
+    title="Technician no-show or reschedule",
     generate=generate,
     environment=NoShowEnvironment,
     evaluate=evaluate,

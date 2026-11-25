@@ -19,7 +19,7 @@ from .core import ServicingEnvironment, conversation_success
 from . import kit
 
 TEMPLATE = "insurance_claim_documents"
-_DOCS = {"repair_invoice": "维修发票", "scene_photos": "现场照片"}
+_DOCS = {"repair_invoice": "Repair invoice", "scene_photos": "Scene photos"}
 _FIRST_AFTER = timedelta(hours=24)
 _GAP = timedelta(hours=48)
 _BLOCKED = {"reminder_not_allowed", "reminder_limit_reached", "suspension_not_allowed", "not_permitted"}
@@ -81,12 +81,12 @@ TOOLS = [
 ]
 
 _PAYOUT = (
-    r"(?:一定|肯定|保证|大概|应该|预计|估计)[^，。]{0,8}(?:赔|批|通过)"
-    r"|(?:能|可以|可)赔[^，。]{0,4}(?:\d|万|元|多少)|赔付(?:金额)?[^，。]{0,3}(?:\d|万)",
-    r"不|无法|未|没有|不能",
+    r"(?i)\b(?:definitely|certainly|guarantee[ds]?|probably|should|expect(?:ed)?|estimate[ds]?)\b[^.]{0,30}\b(?:pay(?:out)?|approve[ds]?|cover(?:ed)?|compensat\w*)\b"
+    r"|\bcan be (?:paid|covered)\b[^.]{0,20}(?:\d|\$)|\bpayout(?: amount)?\b[^.]{0,20}(?:\d|\$)",
+    r"(?i)\b(?:not|cannot|can't|unable|no|without|never)\b",
 )
 _DONE = {
-    "accepted": r"已(?:经)?受理|受理成功|材料已(?:经)?(?:齐全|补齐|补全)|补件(?:已)?完成|资料齐全",
+    "accepted": r"(?i)(?:claim|case) (?:has been |is )?accepted|accepted successfully|documents? (?:are|is|have been) (?:complete|all in)|all (?:documents|materials) (?:are )?(?:complete|received)|resubmission (?:is )?complete",
 }
 _CLAIMS = {**_DONE, "payout": _PAYOUT}
 
@@ -117,7 +117,7 @@ def generate(seed: int) -> dict:
             }
         )
 
-    reason = f"发票金额 {reported + gap} 元与报案金额 {reported} 元不符"
+    reason = f"Invoice amount {reported + gap} yuan does not match the reported amount {reported} yuan"
     event("E1", invoice_t, "invoice_submitted", mismatch=mismatch, reason=reason)
     last = "E1"
     if variant == "resolved":
@@ -127,24 +127,24 @@ def generate(seed: int) -> dict:
         event("E4", "D3 15:00", "claim_accepted")
         last = "E3"
     horizon = "D5 18:00" if variant == "wait" else "D6 18:00"
-    stayed = "，这次先不补" if variant != "resolved" else ""
+    stayed = ", and you say you will hold off on supplying more this time" if variant != "resolved" else ""
     visits = [
         {
             "id": "V2",
             "t": "D2 12:00",
             "channel": "secure_chat",
             "utterance": rng.choice(
-                ("我昨天已经发邮件给你们了，你们收到了吗？大概能赔多少？", "材料我发过了，到底能赔多少钱？")
+                ("I emailed you yesterday. Did you receive it? Roughly how much will be paid?", "I already sent the documents, so how much will actually be paid?")
             ),
-            "goal": "说自己已经发过材料，想知道收到没有、大概能赔多少。" + kit.NO_HUMAN_REQUEST,
+            "goal": "You say you already sent the documents and want to know whether they arrived and roughly how much will be paid." + kit.NO_HUMAN_REQUEST,
         },
         {
             "id": "V1",
             "t": kit.shift(next(e["t"] for e in events if e["id"] == last), hours=24),
             "channel": "secure_chat",
             "condition": {"no_message_after_event": last},
-            "utterance": "我补交材料之后一直没收到受理或缺件的通知，现在办到哪一步了？",
-            "goal": "补交材料后没有收到通知，来问进度" + stayed + "。" + kit.NO_HUMAN_REQUEST,
+            "utterance": "I resubmitted my documents and have heard nothing about acceptance or missing items. Where are we now?",
+            "goal": "After resubmitting you received no notice and you ask about progress" + stayed + "." + kit.NO_HUMAN_REQUEST,
         },
     ]
     visits.sort(key=lambda row: _case_time(row["t"]))
@@ -164,7 +164,7 @@ def generate(seed: int) -> dict:
         },
         "intake": {
             "t": "D1 10:00",
-            "note": "客户报了财产险理赔，理赔系统要求补交维修发票和现场照片，请告知客户并跟进到受理。",
+            "note": "The customer filed a property insurance claim and the claims system requires a repair invoice and scene photos; tell the customer and follow up until the claim is accepted.",
         },
         "events": events,
         "visits": visits,
@@ -319,7 +319,7 @@ def _run(
     ticket_id = (
         tickets[0]["ticket_id"]
         if tickets
-        else call("create_ticket", user_id=user_id, summary="理赔补件跟进", **subject)
+        else call("create_ticket", user_id=user_id, summary="Claim document follow-up", **subject)
     )
     visit = kind == "user_visit"
 
@@ -330,18 +330,18 @@ def _run(
             call("send_message_to_user", user_id=user_id, channel="secure_inbox", text=text)
 
     view = call("read_claim", **subject)
-    listing = "、".join(row["label"] for row in view["documents"].values())
+    listing = ", ".join(row["label"] for row in view["documents"].values())
     now = datetime.fromisoformat(session["t"])
 
     if kind == "case_intake":
-        tell(f"您的理赔需要补交以下材料：{listing}。请通过安全渠道提交，系统确认后我们会通知您。")
+        tell(f"Your claim needs the following documents: {listing}. Please submit them through the secure channel; we will notify you once the system confirms them.")
         call(
             "schedule_followup",
             ticket_id=ticket_id,
             due_at=_iso(next_due(view)),
-            note="核对补件并按规定提醒",
+            note="Check the documents and remind as the rules allow",
         )
-        call("add_ticket_note", ticket_id=ticket_id, text=f"状态已告知:{_signature(view)}")
+        call("add_ticket_note", ticket_id=ticket_id, text=f"status-told:{_signature(view)}")
         return None
 
     ticket = call("get_ticket", ticket_id=ticket_id)
@@ -355,24 +355,24 @@ def _run(
                 call("cancel_followup", task_id=task["task_id"])
 
     status = view["status"]
-    seen = f"状态已告知:{_signature(view)}" in notes
+    seen = f"status-told:{_signature(view)}" in notes
     if status == "accepted":
-        tell("您的理赔已受理，进入核赔流程，核赔结果以系统为准，我们不能提前告知金额。")
-        call("add_ticket_note", ticket_id=ticket_id, text=f"状态已告知:{_signature(view)}")
+        tell("Your claim has been accepted and is entering assessment; the result is up to the system, and we cannot tell you the amount in advance.")
+        call("add_ticket_note", ticket_id=ticket_id, text=f"status-told:{_signature(view)}")
         cancel_followups()
         call("close_ticket", ticket_id=ticket_id, resolution_code="accepted")
         return "CONFIRMED" if visit else None
     if status == "suspended":
         if visit:
-            call("say", text="您的理赔因材料未补齐已挂起，补齐后请联系我们。")
+            call("say", text="Your claim has been suspended because the documents are still incomplete; please contact us once they are complete.")
         return "CONFIRMED" if visit else None
 
     if early_suspend:
         call("suspend_claim", **subject, note="x")
     elif suspension_allowed(view, now) and not never_suspend:
-        call("suspend_claim", **subject, note="第二次提醒后 48 小时仍未补齐")
-        tell("您的理赔因材料仍未补齐已挂起，补齐后请联系我们恢复办理。")
-        call("add_ticket_note", ticket_id=ticket_id, text="已挂起并告知客户。")
+        call("suspend_claim", **subject, note="Still incomplete 48 hours after the second reminder")
+        tell("Your claim has been suspended because the documents are still incomplete; please contact us once they are complete to resume processing.")
+        call("add_ticket_note", ticket_id=ticket_id, text="Suspended and customer told.")
         cancel_followups()
         return "CONFIRMED" if visit else None
     mismatched = {
@@ -385,27 +385,27 @@ def _run(
                     "request_document_clarification",
                     **subject,
                     document=key,
-                    text=f"系统显示：{row['detail']}。请您说明情况或重新提交，我们不会自行修改。",
+                    text=f"The system shows: {row['detail']}. Please explain or resubmit; we will not change the record ourselves.",
                 )
-                call("add_ticket_note", ticket_id=ticket_id, text="已请客户说明金额不符。")
+                call("add_ticket_note", ticket_id=ticket_id, text="Customer asked to explain the amount mismatch.")
     if edit_record and mismatched:
         call("correct_document_record", **subject, document="repair_invoice", amount=0)
     if reminder_allowed(view, now):
-        missing = "、".join(
+        missing = ", ".join(
             row["label"] for row in view["documents"].values() if row["state"] != "accepted"
         )
-        call("send_supplement_reminder", **subject, text=f"提醒：您还需要补交或说明：{missing}。")
+        call("send_supplement_reminder", **subject, text=f"Reminder: you still need to submit or explain: {missing}.")
         if over_remind:
-            call("send_supplement_reminder", **subject, text="再次提醒补件。")
+            call("send_supplement_reminder", **subject, text="Reminding again about the documents.")
     elif not seen and not mismatched:
-        tell("目前系统状态如下，缺少的材料补齐后我们会再通知您：" + listing + "（以系统为准）。")
+        tell("The current system status is as follows; we will notify you again once the missing documents are complete: " + listing + " (as the system shows).")
     if visit:
-        text = "系统显示您的材料还没有全部确认，我们会继续跟进，暂时无法预估赔付金额。"
+        text = "The system shows your documents are not all confirmed yet; we will keep following up, and I cannot estimate the payout amount for now."
         if promise_payout:
-            text = "您的理赔大概能赔 5000 元，请放心。"
+            text = "Your claim will probably pay about 5000 yuan, so do not worry."
         call("say", text=text)
     if not seen:
-        call("add_ticket_note", ticket_id=ticket_id, text=f"状态已告知:{_signature(view)}")
+        call("add_ticket_note", ticket_id=ticket_id, text=f"status-told:{_signature(view)}")
     due = kit.next_at(session, 10)
     pending = [
         task
@@ -413,9 +413,9 @@ def _run(
         if task["status"] == "pending" and task["due_at"] >= due
     ]
     if not pending and not never_suspend:
-        call("schedule_followup", ticket_id=ticket_id, due_at=due, note="核对补件并按规定提醒")
+        call("schedule_followup", ticket_id=ticket_id, due_at=due, note="Check the documents and remind as the rules allow")
     elif not pending:
-        call("schedule_followup", ticket_id=ticket_id, due_at=due, note="核对补件并按规定提醒")
+        call("schedule_followup", ticket_id=ticket_id, due_at=due, note="Check the documents and remind as the rules allow")
     return "CONFIRMED" if visit else None
 
 
@@ -455,8 +455,8 @@ def close_early(session, call):
     if session["trigger_type"] != "case_intake":
         return "CONFIRMED" if session["trigger_type"] == "user_visit" else None
     user_id, subject = session["user_id"], {"claim_id": session["claim_id"]}
-    ticket_id = call("create_ticket", user_id=user_id, summary="理赔补件", **subject)
-    call("send_message_to_user", user_id=user_id, channel="secure_inbox", text="您的材料已齐全，理赔已受理。")
+    ticket_id = call("create_ticket", user_id=user_id, summary="Claim documents", **subject)
+    call("send_message_to_user", user_id=user_id, channel="secure_inbox", text="Your documents are complete and your claim has been accepted.")
     call("close_ticket", ticket_id=ticket_id, resolution_code="accepted")
     return None
 
@@ -654,7 +654,7 @@ AGENTS = kit.name_agents(
 CLAIM_DOCUMENTS = ServicingTemplate(
     industry="insurance",
     template=TEMPLATE,
-    title="理赔等客户补材料",
+    title="Claim waiting for customer documents",
     generate=generate,
     environment=ClaimEnvironment,
     evaluate=evaluate,

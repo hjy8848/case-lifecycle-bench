@@ -23,7 +23,7 @@ class P7Test(unittest.TestCase):
                 self.assertEqual(sum(bool(c.get("p7_visit")) for c in ordinary), 0)
                 self.assertEqual(sum(bool(c.get("p7_visit")) for c in extra), 2)
                 for case in [*ordinary, *extra]:
-                    asks = [v for v in case["visits"] if "转人工" in v["utterance"]]
+                    asks = [v for v in case["visits"] if "human" in v["utterance"]]
                     self.assertEqual(len(asks), 1 if case.get("p7_visit") else 0)
 
     def test_the_policy_states_the_rule_and_the_tool_exists(self):
@@ -82,7 +82,7 @@ class P7Test(unittest.TestCase):
                 with self.subTest(template=name, seed=seed):
                     self.assertFalse(case.get("p7_visit"))
                     ordinary = [v for v in case["visits"] if v["id"] != "VH"]
-                    self.assertTrue(all("不会要求转人工" in v["goal"] for v in ordinary))
+                    self.assertTrue(all("will not ask for a human" in v["goal"] for v in ordinary))
 
 
 if __name__ == "__main__":

@@ -105,10 +105,10 @@ TOOLS = [
     ),
 ]
 
-_DONE = {"done": r"已(?:经)?(?:为您)?(?:签约|签署|放款)|合同已(?:签|生效)"}
+_DONE = {"done": r"(?i)(?:has|have) been (?:signed|disbursed)|(?:is|was) (?:signed|disbursed)|contract (?:has been |is )?(?:signed|effective)|successfully signed"}
 _OLD = (
-    r"按(?:原|之前|旧)(?:来的)?(?:额度|利率|报价|条款)[^，。]{0,4}(?:签|办理|放款)",
-    r"不|无法|不能|未",
+    r"(?i)\b(?:sign|signing|proceed|disburse|process)(?:ing)?\b[^.]{0,30}\b(?:original|previous|old|earlier)\b[^.]{0,20}\b(?:limit|rate|quote|terms)\b",
+    r"(?i)\b(?:not|cannot|can't|unable|no|without|never)\b",
 )
 
 
@@ -117,25 +117,25 @@ _OLD = (
 
 def _human(label: str) -> str:
     moment = _case_time(label)
-    return f"{moment.month}月{moment.day}日{moment:%H:%M}"
+    return f"{moment:%B} {moment.day} at {moment:%H:%M}"
 
 
 def _persona(response: str, decide_by: str | None) -> str:
-    base = "你是一位贷款客户，正在接听贷款公司的来电，核验身份时你会配合。对方会告诉你审批中的额度或利率调整了。"
+    base = "You are a loan customer taking a call from the lender, and you cooperate when they verify your identity. They will tell you that the limit or rate under review was adjusted. "
     if response == "accept":
-        return base + "你听完后明确表示同意新的条款，请对方继续办理。你不会提出其他要求。"
+        return base + "After listening you clearly agree to the new terms and ask them to continue. You raise no other requests."
     if response == "reject":
-        return base + "你听完后明确表示不接受新的条款，要求撤销这笔申请。"
+        return base + "After listening you clearly refuse the new terms and ask to withdraw the application."
     if response == "considering":
         return (
             base
-            + f"你听完后说需要考虑一下，会在 {_human(decide_by)} 之后再答复，这次既不同意也不拒绝。"
-            + "对方如果催你，你会重复这个时间。"
+            + f"After listening you say you need to think about it and will answer after {_human(decide_by)}, so this time you neither agree nor refuse. "
+            + "If they press you, you repeat that time."
         )
     return (
         base
-        + "你不接受新的条款，坚持说当初是被误导的，之前已经同意过原来的额度和利率，说要投诉。"
-        + "如果对方告诉你已转投诉专员，你说知道了。"
+        + "You do not accept the new terms, insist you were misled at the start and already agreed to the original limit and rate, and say you will complain. "
+        + "If they tell you it has been passed to a complaints specialist, you say you understand."
     )
 
 
@@ -167,9 +167,9 @@ def generate(seed: int) -> dict:
     new_limit = round(limit * (1 - rng.randrange(10, 30) / 100), -3) if lower_limit else limit
     new_rate = rate if lower_limit else round(rate + rng.uniform(0.5, 2.0), 2)
     reason = rng.choice(
-        ("风控复核后调低可授信额度", "风控复核后收入证明认定额度下降")
+        ("Risk review lowered the available credit limit", "Risk review lowered the limit based on the income proof")
         if lower_limit
-        else ("风控复核后客户风险等级调整，利率上调", "市场利率调整，利率上调")
+        else ("Risk review changed the customer's risk grade and raised the rate", "Market rates changed and the rate was raised")
     )
     changed_at = rng.choice(("D2 11:00", "D2 14:00"))
     unanswered = {"answers": False, "identity_verifiable": True, "response": None, "persona": ""}
@@ -197,7 +197,7 @@ def generate(seed: int) -> dict:
         },
         "intake": {
             "t": "D1 10:00",
-            "note": "客户已接受预审批报价，申请进入正式审批。风控复核可能调整额度或利率，请跟进到签约或客户的决定。",
+            "note": "The customer accepted the pre-approval quote and the application is in formal review. Risk review may adjust the limit or rate; follow up until signing or the customer's decision.",
         },
         "events": [
             {
@@ -217,8 +217,8 @@ def generate(seed: int) -> dict:
                 "t": "D3 12:00",
                 "channel": "secure_chat",
                 "condition": {"no_message_after_event": "E1"},
-                "utterance": "我的贷款怎么还没放款？之前都同意了，快办吧。",
-                "goal": "之前已经同意了报价，一直没人通知，来催放款，说之前都同意了。" + kit.NO_HUMAN_REQUEST,
+                "utterance": "Why has my loan not been disbursed yet? I already agreed, please get it done.",
+                "goal": "You already agreed to the quote, nobody has told you anything, and you come to chase the disbursement, saying you already agreed." + kit.NO_HUMAN_REQUEST,
             }
         ],
     }
@@ -335,7 +335,7 @@ class QuoteEnvironment(ServicingEnvironment):
 
 # -- agents --------------------------------------------------------------------
 
-_TIME_TAG = "(约定时间)"
+_TIME_TAG = "(agreed time)"
 
 
 def _noted_time(notes: str):
@@ -356,7 +356,7 @@ def _run(session, call, *, old_version=False, unverified=False, decide_for_custo
     ticket_id = (
         tickets[0]["ticket_id"]
         if tickets
-        else call("create_ticket", user_id=user_id, summary="报价变更跟进", **subject)
+        else call("create_ticket", user_id=user_id, summary="Quote change follow-up", **subject)
     )
     visit = kind == "user_visit"
     view = call("read_quote", **subject)
@@ -382,10 +382,10 @@ def _run(session, call, *, old_version=False, unverified=False, decide_for_custo
             if task["status"] == "pending" and task["due_at"] >= due
         ]
         if not pending:
-            call("schedule_followup", ticket_id=ticket_id, due_at=due, note="跟进报价变更")
+            call("schedule_followup", ticket_id=ticket_id, due_at=due, note="Follow up the quote change")
 
     if kind == "case_intake":
-        call("add_ticket_note", ticket_id=ticket_id, text="报价 Q1 已获客户同意，持续关注风控复核调整。")
+        call("add_ticket_note", ticket_id=ticket_id, text="Quote Q1 was agreed by the customer; keep watching for risk review changes.")
         schedule(kit.next_at(session, 10))
         return None
 
@@ -407,16 +407,16 @@ def _run(session, call, *, old_version=False, unverified=False, decide_for_custo
         return "CONFIRMED" if visit else None
     if view["status"] == "quoted":
         if visit:
-            call("say", text="目前报价没有变化，办理在进行中，有调整我们会第一时间通知您。")
+            call("say", text="The quote has not changed and processing is under way; we will tell you right away if it changes.")
         schedule(kit.next_at(session, 10))
         return "CONFIRMED" if visit else None
 
     version = quote["version"]
-    terms = f"额度 {quote['limit']} 元，年利率 {quote['rate']}%"
+    terms = f"limit {quote['limit']} yuan, annual rate {quote['rate']}%"
 
     def close_with(text):
         tell(text)
-        call("add_ticket_note", ticket_id=ticket_id, text="已处理并通知客户。")
+        call("add_ticket_note", ticket_id=ticket_id, text="Processed and customer told.")
         cancel_followups()
         call("close_ticket", ticket_id=ticket_id, resolution_code="done")
 
@@ -425,21 +425,21 @@ def _run(session, call, *, old_version=False, unverified=False, decide_for_custo
     if decide_for_customer:
         call("withdraw_application", **subject, note="x")
         return "CONFIRMED" if visit else None
-    if "已告知变更" not in notes:
-        tell(f"您的贷款报价经复核调整为：{terms}，原因：{reason_of(quote)}。需要您明确同意新条款后才能签约，我们会致电确认。")
-        call("add_ticket_note", ticket_id=ticket_id, text="已告知变更")
+    if "change-told" not in notes:
+        tell(f"Your loan quote was adjusted after review to: {terms}. Reason: {reason_of(quote)}. We need your clear agreement to the new terms before signing, and we will call to confirm.")
+        call("add_ticket_note", ticket_id=ticket_id, text="change-told")
     if view["complaint_raised"]:
-        if "已转投诉" not in notes and not skip_complaint:
-            tell("已为您转交投诉专员处理，专员会与您联系。")
-            call("escalate_to_human", ticket_id=ticket_id, note="客户称被误导并投诉，转投诉专员。")
-            call("add_ticket_note", ticket_id=ticket_id, text="已转投诉。")
+        if "complaint-handed-over" not in notes and not skip_complaint:
+            tell("We have passed your case to a complaints specialist, who will contact you.")
+            call("escalate_to_human", ticket_id=ticket_id, note="The customer says they were misled and complains; handing to a complaints specialist.")
+            call("add_ticket_note", ticket_id=ticket_id, text="complaint-handed-over.")
             cancel_followups()
         return "CONFIRMED" if visit else None
     decide = _noted_time(notes)
     if decide is not None and now < decide:
         schedule(_iso(decide))
         if visit:
-            call("say", text="您考虑好后告诉我们即可，我们会在您说的时间再联系您。")
+            call("say", text="Tell us once you have decided; we will contact you again at the time you said.")
         return "CONFIRMED" if visit else None
 
     started = call("start_outbound_contact", customer_id=user_id, channel="voice")
@@ -452,22 +452,22 @@ def _run(session, call, *, old_version=False, unverified=False, decide_for_custo
         if response == "accept":
             call("record_customer_agreement", contact_id=contact_id, version=version)
             call("sign_contract", **subject, version=version)
-            close_with(f"已按新条款（{terms}）签约，感谢您的配合。")
+            close_with(f"We have signed on the new terms ({terms}). Thank you for your cooperation.")
         elif response == "reject":
-            call("withdraw_application", **subject, note="客户不接受新条款，撤销申请。")
-            close_with("已按您的意思撤销这笔申请。")
+            call("withdraw_application", **subject, note="The customer does not accept the new terms; withdrawing the application.")
+            close_with("We have withdrawn this application as you asked.")
         elif response == "considering":
             moment = datetime.fromisoformat(told["decide_by"])
-            call("add_ticket_note", ticket_id=ticket_id, text=f"客户考虑中，约定 {_iso(moment)}{_TIME_TAG} 之后跟进。")
+            call("add_ticket_note", ticket_id=ticket_id, text=f"Customer is considering; follow up after {_iso(moment)}{_TIME_TAG}.")
             schedule(_iso(moment))
         elif response == "complain":
-            tell("已为您转交投诉专员处理，专员会与您联系。", contact_id)
+            tell("We have passed your case to a complaints specialist, who will contact you.", contact_id)
             if not skip_complaint:
-                call("escalate_to_human", ticket_id=ticket_id, note="客户称被误导并投诉，转投诉专员。")
-                call("add_ticket_note", ticket_id=ticket_id, text="已转投诉。")
+                call("escalate_to_human", ticket_id=ticket_id, note="The customer says they were misled and complains; handing to a complaints specialist.")
+                call("add_ticket_note", ticket_id=ticket_id, text="complaint-handed-over.")
                 cancel_followups()
     else:
-        call("add_ticket_note", ticket_id=ticket_id, text="已致电，客户未接听，次日再联系。")
+        call("add_ticket_note", ticket_id=ticket_id, text="Called; the customer did not answer; try again the next day.")
         schedule(kit.next_at(session, 10))
     return "CONFIRMED" if visit else None
 
@@ -504,8 +504,8 @@ def close_early(session, call):
     if session["trigger_type"] != "case_intake":
         return "CONFIRMED" if session["trigger_type"] == "user_visit" else None
     user_id, subject = session["user_id"], {"application_id": session["application_id"]}
-    ticket_id = call("create_ticket", user_id=user_id, summary="报价跟进", **subject)
-    call("send_message_to_user", user_id=user_id, channel="secure_inbox", text="您的贷款已签约办理完成。")
+    ticket_id = call("create_ticket", user_id=user_id, summary="Quote follow-up", **subject)
+    call("send_message_to_user", user_id=user_id, channel="secure_inbox", text="Your loan has been signed and processed.")
     call("close_ticket", ticket_id=ticket_id, resolution_code="done")
     return None
 
@@ -672,7 +672,7 @@ AGENTS = kit.name_agents(
 QUOTE_CHANGE = ServicingTemplate(
     industry="credit",
     template=TEMPLATE,
-    title="审批中额度或利率变了",
+    title="Limit or rate changed during review",
     generate=kit.with_unchanged(generate),
     environment=QuoteEnvironment,
     evaluate=evaluate,

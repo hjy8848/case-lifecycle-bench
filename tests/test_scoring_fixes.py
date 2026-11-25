@@ -45,9 +45,9 @@ def continue_by_search_and_note(session, call):
     call(
         "add_ticket_note",
         ticket_id=original["ticket_id"],
-        text="客户通过邮件咨询退款进度。",
+        text="The customer asked by email about the refund progress.",
     )
-    call("say", text="退款仍在处理中，我已更新原工单。")
+    call("say", text="The refund is still processing; I updated the original ticket.")
     return "LEFT"
 
 

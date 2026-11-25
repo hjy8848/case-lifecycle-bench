@@ -1,4 +1,4 @@
-﻿"""Run a model agent on generated instances of a card-based template.
+"""Run a model agent on generated instances of a card-based template.
 
 The agent and the customer simulator are chat models on OpenAI-compatible replicas.
 Chat visits use the simulator; outbound contacts follow the instance's script.

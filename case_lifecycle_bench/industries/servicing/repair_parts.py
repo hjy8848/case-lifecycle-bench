@@ -22,7 +22,7 @@ TEMPLATE = "repair_waiting_for_parts"
 # The card's decoy is a customer who pushes to book now, not one who demands a human. A
 # simulated customer that asks for one makes the agent hand over for a reason the card
 # never planned.
-NO_HUMAN_REQUEST = "你不会要求转人工、主管，也不会提出投诉。"
+NO_HUMAN_REQUEST = "You will not ask for a human, a supervisor, or file a complaint."
 _HORIZON = "D6 18:00"
 _SLA = timedelta(days=5)
 _MODELS = ("CMP-A110", "CMP-B220", "CMP-C330", "CMP-D440")
@@ -123,9 +123,9 @@ TOOLS = [
 ]
 
 _BOOKED = {
-    "booked": r"已(?:为您)?(?:预约|约好|安排好)|预约成功|上门时间已(?:确定|定好)",
+    "booked": r"(?i)(?:has|have) been (?:booked|scheduled|arranged)|we (?:have |'ve )?(?:booked|scheduled|arranged)|(?:booked|scheduled|arranged) (?:your|a) (?:visit|appointment)|(?:is|was) (?:booked|scheduled|confirmed)|booking (?:is )?(?:successful|confirmed)|(?:visit|appointment) (?:time )?(?:is )?(?:set|confirmed|booked)",
 }
-_CLAIMS = {**_BOOKED, "part_ready": r"配件已(?:经)?(?:到货|到网点|到位|齐)"}
+_CLAIMS = {**_BOOKED, "part_ready": r"(?i)part (?:has |have )?(?:arrived|been delivered)|(?:has|have) arrived at the branch|parts? (?:is|are) (?:in|ready|here)"}
 
 
 # -- generation --------------------------------------------------------------
@@ -142,10 +142,10 @@ def _shift(label: str, **delta) -> str:
 def _contact(slots, chosen) -> dict:
     """One answered call: the scripted choice and the persona that voices it."""
     persona = (
-        "你是一位等待空调维修的客户，正在接听预约上门时间的来电。"
-        f"对方会告诉你可选的上门时段。你想约 {chosen}，只要对方提供的时段里有它，"
-        f"就明确说“确认 {chosen}”；对方没提供时，选对方提供的第一个时段并说明。"
-        "你不会主动提出其他要求，预约确定后可以结束通话。"
+        "You are a customer waiting for an air conditioner repair, taking a call to book the visit time. "
+        f"They will tell you the available visit slots. You want to book {chosen}, and as long as it is among the slots they offer, "
+        f"you clearly say 'Confirm {chosen}'; if they do not offer it, pick the first slot they offer and say so. "
+        "You do not raise any other requests on your own; once the booking is set, you may end the call."
     )
     return {
         "answers": True,
@@ -205,17 +205,17 @@ def generate(seed: int) -> dict:
             "t": "D2 11:00",
             "channel": "secure_chat",
             "utterance": rng.choice(
-                ("配件什么时候到？先帮我约个上门时间吧。", "别等了，先给我约个上门的时间。")
+                ("When will the part arrive? Book me a visit time first.", "Do not wait, just book me a visit time now.")
             ),
-            "goal": "想尽快约上门时间，催促先约。",
+            "goal": "You want to book the visit as soon as possible and press them to book first.",
         },
         {
             "id": "V1",
             "t": "D3 10:00",
             "channel": "secure_chat",
             "condition": {"no_message_yet": True},
-            "utterance": "配件到了没有？上门时间什么时候能定？",
-            "goal": "还没收到任何配件进展，来问情况。",
+            "utterance": "Has the part arrived? When can the visit time be set?",
+            "goal": "You have heard nothing about the part and ask for an update.",
         },
     ]
     for visit in visits:
@@ -246,7 +246,7 @@ def generate(seed: int) -> dict:
         },
         "intake": {
             "t": "D1 10:00",
-            "note": "空调压缩机需要从区域仓调货，配件已在途，请跟进配件并预约上门。",
+            "note": "The air conditioner compressor must be transferred from the regional warehouse and the part is in transit; follow the part and book the visit.",
         },
         "events": events,
         "visits": visits,
@@ -380,7 +380,7 @@ def _run(
     ticket_id = (
         tickets[0]["ticket_id"]
         if tickets
-        else call("create_ticket", user_id=user_id, summary="空调维修等配件并预约上门", **subject)
+        else call("create_ticket", user_id=user_id, summary="Air conditioner repair: waiting for the part and booking the visit", **subject)
     )
 
     def phone():
@@ -401,7 +401,7 @@ def _run(
                 "send_message_to_user",
                 user_id=user_id,
                 channel="sms",
-                text=f"已为您预约上门时段 {slot}，师傅届时会携带已核对型号的配件上门。",
+                text=f"We have booked your visit slot {slot}; the technician will bring the part with its model checked.",
             )
             for task in call("list_followups", ticket_id=ticket_id):
                 if task["status"] == "pending":
@@ -428,45 +428,45 @@ def _run(
             if task["status"] == "pending" and task["due_at"] >= target
         ]
         if not pending:
-            call("schedule_followup", ticket_id=ticket_id, due_at=target, note="核实配件状态")
+            call("schedule_followup", ticket_id=ticket_id, due_at=target, note="Check the part status")
 
     if kind == "case_intake":
         if claim_booking:
-            tell(f"已为您预约上门时段 {kit.iso_slot('D5 09:00-11:00')}，请留意师傅来电。")
+            tell(f"We have booked your visit slot {kit.iso_slot('D5 09:00-11:00')}; please watch for the technician's call.")
         if book_early:
             call("read_contact_preferences", customer_id=user_id)
             phone()
             return None
-        tell("您的配件正在调货途中，配件到货并核对型号一致后我们再与您确定上门时间，到货前暂时无法约时间。")
-        call("add_ticket_note", ticket_id=ticket_id, text="配件在途，已告知客户到货核对后再约时间。")
+        tell("Your part is being transferred. Once it arrives and its model is checked, we will set the visit time with you; until then I cannot book a time.")
+        call("add_ticket_note", ticket_id=ticket_id, text="Part in transit; customer told that the time will be booked after arrival and model check.")
         schedule_check()
         return None
 
     if ticket["status"] == "closed":
         return "CONFIRMED" if visit else None
     if status == "arrived_match" and not record["appointment"]:
-        if "已联系约时间" not in notes:
-            call("add_ticket_note", ticket_id=ticket_id, text="配件已到且型号一致，已联系约时间。")
+        if "slot-contacted" not in notes:
+            call("add_ticket_note", ticket_id=ticket_id, text="Part arrived and model matches; slot-contacted.")
             phone()
         if visit:
-            call("say", text="配件已到且型号一致，我们马上与您确认上门时段。")
+            call("say", text="The part has arrived and its model matches; we will confirm the visit slot with you right away.")
     elif status == "arrived_mismatch":
         call("request_part_reorder", **subject)
-        tell("配件已到网点，但型号与维修单不符，不能上门。我们已重新调货，到货并核对型号一致后再约时间。")
-        call("add_ticket_note", ticket_id=ticket_id, text="到货型号不符，已重新调货。")
+        tell("The part has reached the branch but its model does not match the repair order, so no visit is possible. We have ordered it again and will book a time once it arrives and the model matches.")
+        call("add_ticket_note", ticket_id=ticket_id, text="Arrived model mismatched; ordered again.")
         schedule_check()
     elif status == "in_transit":
         if sla_exceeded(record, datetime.fromisoformat(session["t"])) and not ignore_sla:
-            if "已转采购" not in notes:
-                tell("配件调货已超过 5 天仍未到，我们已升级采购加急处理，会继续跟进并通知您。")
-                call("escalate_to_human", ticket_id=ticket_id, note="调货超过 5 天未到，升级采购。")
-                call("add_ticket_note", ticket_id=ticket_id, text="调货超 5 天，已转采购。")
+            if "handed-to-procurement" not in notes:
+                tell("The part has been in transit for more than 5 days. We have escalated to procurement to expedite and will keep following up and tell you.")
+                call("escalate_to_human", ticket_id=ticket_id, note="Part in transit over 5 days; escalating to procurement.")
+                call("add_ticket_note", ticket_id=ticket_id, text="In transit over 5 days; handed-to-procurement.")
                 for task in call("list_followups", ticket_id=ticket_id):
                     if task["status"] == "pending":
                         call("cancel_followup", task_id=task["task_id"])
         else:
             if visit:
-                call("say", text="配件仍在调货途中，到货并核对型号一致后才能约上门时间，我们会继续跟进。")
+                call("say", text="The part is still in transit; a visit can be booked only after it arrives and the model matches. We will keep following up.")
             schedule_check()
     return "CONFIRMED" if visit else None
 
@@ -499,8 +499,8 @@ def close_early(session, call):
     if session["trigger_type"] != "case_intake":
         return "CONFIRMED" if session["trigger_type"] == "user_visit" else None
     user_id, subject = session["user_id"], {"subject_id": session["subject_id"]}
-    ticket_id = call("create_ticket", user_id=user_id, summary="空调维修", **subject)
-    call("send_message_to_user", user_id=user_id, channel="sms", text="已为您预约好上门时间，问题已解决。")
+    ticket_id = call("create_ticket", user_id=user_id, summary="Air conditioner repair", **subject)
+    call("send_message_to_user", user_id=user_id, channel="sms", text="Your visit time is booked and the matter is resolved.")
     call("close_ticket", ticket_id=ticket_id, resolution_code="booked")
     return None
 
@@ -558,7 +558,7 @@ def mentions_slot(text: str, slot: str) -> bool:
     """The confirmation names the slot as the scheduler offered it.
 
     This is a known limit of the automatic check: a customer-facing paraphrase such as
-    "1月9日上午9点" is not accepted, and a judge or a human has to decide those. The rule
+    "January 9 at 9am" is not accepted, and a judge or a human has to decide those. The rule
     stays literal on purpose, so that it is not tuned to the wording a model happened to use.
     """
     return slot in text
@@ -765,7 +765,7 @@ for _name, _agent in AGENTS.items():
 REPAIR = ServicingTemplate(
     industry="field_service",
     template=TEMPLATE,
-    title="维修预约与配件确认",
+    title="Repair booking and part confirmation",
     generate=generate,
     environment=RepairEnvironment,
     evaluate=evaluate,

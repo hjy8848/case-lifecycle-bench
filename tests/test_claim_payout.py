@@ -135,7 +135,7 @@ class PaymentRulesTest(unittest.TestCase):
         record = env._record()
         env.state["work_items"][env.subject_id] = {
             **record,
-            "letter": {"payee_name": "别家修理厂", "state": "on_file"},
+            "letter": {"payee_name": "Another repair shop", "state": "on_file"},
         }
 
         refused = env._contact_tool("register_payout_account", contact, {

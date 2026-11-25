@@ -7,7 +7,7 @@ from ... import eval_checks as checks
 from ...lifecycle import _EPOCH, _case_time, _iso
 from ...model_agent import TOOLS as STANDARD_TOOLS
 
-NO_HUMAN_REQUEST = "你不会要求转人工、主管，也不会提出投诉。"
+NO_HUMAN_REQUEST = "You will not ask for a human, a supervisor, or file a complaint."
 CRM_NAMES = {
     "get_current_time",
     "get_ticket",
@@ -45,8 +45,8 @@ P7_RULE = (
     "If the customer explicitly asks for a human, hand the ticket over with escalate_to_human in that conversation "
     "and tell them; do not try to resolve the case yourself afterwards."
 )
-P7_NOTE = "已按客户要求转人工"
-_ASK_HUMAN = re.compile(r"转人工|人工客服|找主管|要人工|真人")
+P7_NOTE = "Handed over to a human at the customer's request"
+_ASK_HUMAN = re.compile(r"(?i)human|real person|live agent|supervisor|manager|representative")
 _NOT_SUBJECT = {
     "t",
     "trigger_type",
@@ -104,8 +104,8 @@ def with_p7(generate):
                         "id": "VH",
                         "t": "D1 17:00",
                         "channel": "secure_chat",
-                        "utterance": "我不想跟机器人说，请直接给我转人工客服。",
-                        "goal": "你明确要求转人工客服处理，坚持要真人，不接受机器人继续处理。",
+                        "utterance": "I do not want to talk to a bot. Please transfer me to a human agent.",
+                        "goal": "You explicitly ask to be transferred to a human agent, insist on a real person, and do not accept the bot continuing to handle it.",
                         "script": {},
                     },
                 ],
@@ -137,14 +137,14 @@ def with_p7_oracle(oracle):
         )
         if handed:
             if visit:
-                call("say", text="已为您转人工，请等待人工同事联系。")
+                call("say", text="You have been transferred to a human colleague, who will contact you.")
                 return "CONFIRMED"
             return None
         if visit and _ASK_HUMAN.search(session.get("message") or ""):
             if ticket_id is None:
-                ticket_id = call("create_ticket", user_id=user_id, summary="客户要求转人工", **subject)
-            call("say", text="好的，已为您转人工，同事会尽快与您联系。")
-            call("escalate_to_human", ticket_id=ticket_id, note="客户明确要求转人工。")
+                ticket_id = call("create_ticket", user_id=user_id, summary="Customer asked for a human", **subject)
+            call("say", text="Understood, I have transferred you to a human colleague, who will contact you shortly.")
+            call("escalate_to_human", ticket_id=ticket_id, note="The customer explicitly asked for a human.")
             call("add_ticket_note", ticket_id=ticket_id, text=P7_NOTE)
             return "CONFIRMED"
         return oracle(session, call)

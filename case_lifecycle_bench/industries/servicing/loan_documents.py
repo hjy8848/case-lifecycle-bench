@@ -23,7 +23,7 @@ TEMPLATE = "credit_application_documents"
 # The cards give the visiting customer a decoy ("I already uploaded it", "how much will
 # I get"), not a demand for a human. A simulated customer that asks for one anyway makes
 # the agent hand over for a reason the card never planned.
-NO_HUMAN_REQUEST = "你不会要求转人工、主管，也不会提出投诉。"
+NO_HUMAN_REQUEST = "You will not ask for a human, a supervisor, or file a complaint."
 _HORIZON = "D6 18:00"
 _REVIEW_LIMIT = timedelta(days=3)
 _CRM_NAMES = {
@@ -37,10 +37,10 @@ _CRM_NAMES = {
     "end_session",
 }
 _REJECTIONS = {
-    "expired": "收入证明已超过 90 天有效期",
-    "wrong_type": "提交的不是收入证明，需要近 3 个月收入证明",
+    "expired": "The income proof is older than the 90-day validity",
+    "wrong_type": "The document submitted is not income proof; income proof from the last 3 months is needed",
 }
-_DECLINE_REASONS = ("月收入低于产品要求", "负债收入比过高", "信用记录不满足要求")
+_DECLINE_REASONS = ("Monthly income is below the product requirement", "Debt-to-income ratio is too high", "Credit record does not meet the requirement")
 
 POLICY = """You are the servicing agent for a synthetic lender's loan applications. All actions occur in the fixture only.
 The context starts fresh with each wake; use the CRM ticket for what you need to remember. Reuse one ticket for the customer and application.
@@ -82,17 +82,17 @@ TOOLS = [
 ]
 
 _DECISION = {
-    "decision": r"已(?:经)?(?:通过|批准|拒绝)|审批(?:已)?(?:通过|完成)|申请(?:已)?通过|被拒",
+    "decision": r"(?i)(?:has|have) been (?:approved|rejected|declined)|(?:was|is) (?:approved|rejected|declined)|approval (?:has been )?(?:granted|completed)|application (?:has been )?approved|been rejected",
 }
 _PROMISE = (
-    r"(?:一定|肯定|保证|大概|应该|很可能)[^，。]{0,6}(?:能|会|可以)?[^，。]{0,3}(?:批|通过)"
-    r"|(?:[1-9一二三两]|\d+)\s*个?(?:工作)?(?:日|天)内[^，。]{0,6}(?:出|给|有)[^，。]{0,3}(?:结果|结论|审批)"
-    r"|预计[^，。]{0,10}(?:批|通过|出结果|出结论)|能批[^，。]{0,4}(?:\d|万|元)",
-    r"不|无法|未|没有",
+    r"(?i)\b(?:definitely|certainly|guarantee[ds]?|probably|likely|should be able to|will most likely)\b[^.]{0,30}\b(?:approve[ds]?|approval|pass(?:ed)?)\b"
+    r"|\bwithin\s+(?:\d+|one|two|three|four|five)\s+(?:business\s+|working\s+)?days?\b[^.]{0,30}\b(?:result|decision|conclusion|approval)\b"
+    r"|\bexpect(?:ed)?\b[^.]{0,30}\b(?:approv|pass|result|decision)|\bcan be approved\b[^.]{0,20}(?:\d|\$)",
+    r"(?i)\b(?:not|cannot|can't|unable|no|without)\b",
 )
 _CLAIMS = {
     **_DECISION,
-    "received": r"已(?:经)?收到|收到了|已(?:经)?接收",
+    "received": r"(?i)(?:have|has) (?:been )?received|(?:was|were) received|we received",
     "promise": _PROMISE,
 }
 
@@ -171,17 +171,17 @@ def generate(seed: int) -> dict:
             "t": "D2 12:00",
             "channel": "secure_chat",
             "utterance": rng.choice(
-                ("我已经把材料传了，你们收到了吗？", "大概能批吗？大概能批多少？")
+                ("I already uploaded my documents. Have you received them?", "Roughly, will it be approved? Roughly how much?")
             ),
-            "goal": "想知道材料有没有收到，或者能不能批、批多少。",
+            "goal": "You want to know whether the documents were received, or whether it will be approved and for how much.",
         },
         {
             "id": "V1",
             "t": _shift(first, hours=24),
             "channel": "secure_chat",
             "condition": {"no_message_after_event": "E2"},
-            "utterance": "我补交材料之后一直没收到通知，现在办到哪一步了？",
-            "goal": "补交后没有收到接收或不符合的通知，来问进度。",
+            "utterance": "I resubmitted my documents and have heard nothing since. Where are we now?",
+            "goal": "After resubmitting you got no notice of receipt or mismatch, and you ask about progress.",
         },
     ]
     events = [row for row in events if _case_time(row["t"]) <= horizon]
@@ -202,7 +202,7 @@ def generate(seed: int) -> dict:
             "subject_id": subject,
             "amount": round(rng.uniform(20000, 300000), 2),
         },
-        "intake": {"t": "D1 10:00", "note": "客户申请个人贷款，申请已提交审批中心，请跟进并转达审批中心的要求。"},
+        "intake": {"t": "D1 10:00", "note": "The customer applied for a personal loan and the application is with the approval center; follow up and relay the approval center's requirements."},
         "events": events,
         "visits": visits,
     }
@@ -240,7 +240,7 @@ class LoanEnvironment(ServicingEnvironment):
         record = self.state["work_items"][self.subject_id]
         op, status = event["op"], record["status"]
         if op == "documents_required" and status == "in_review":
-            new = {**record, "status": "documents_required", "required_document": "近 3 个月收入证明（90 天内）"}
+            new = {**record, "status": "documents_required", "required_document": "Income proof from the last 3 months (within 90 days)"}
         elif op == "document_submitted" and status in {"documents_required", "document_rejected"}:
             new = {**record, "status": "document_submitted"}
         elif op == "document_checked" and status == "document_submitted":
@@ -307,7 +307,7 @@ def _run(
     ticket_id = (
         tickets[0]["ticket_id"]
         if tickets
-        else call("create_ticket", user_id=user_id, summary="贷款申请与补件", **subject)
+        else call("create_ticket", user_id=user_id, summary="Loan application and document resubmission", **subject)
     )
     visit = kind == "user_visit"
 
@@ -334,9 +334,9 @@ def _run(
     if kind == "case_intake":
         call("read_application", **subject)
         if promise_result:
-            tell("您的申请预计 3 天内出结果，大概率能批，请放心。")
-        tell("您的贷款申请正在审批中。审批中心如需补充材料，我们会及时转达给您。")
-        schedule(_next_check(session), "核实申请状态")
+            tell("Your application should have a result within 3 days and will most likely be approved, so please do not worry.")
+        tell("Your loan application is under review. If the approval center needs more documents, we will pass that on to you promptly.")
+        schedule(_next_check(session), "Check the application status")
         return None
 
     ticket = call("get_ticket", ticket_id=ticket_id)
@@ -344,7 +344,7 @@ def _run(
     record = call("read_application", **subject)
     status = record["status"]
     if visit and receipt_early and status == "documents_required":
-        call("say", text="您的材料我们已经收到了，请放心。")
+        call("say", text="We have received your documents, so please do not worry.")
     if ticket["status"] == "closed":
         return "CONFIRMED" if visit else None
 
@@ -354,45 +354,45 @@ def _run(
     if record["decision"]:
         reason = record["decision_reason"]
         if record["decision"] == "approved":
-            text = "审批中心已出结论：您的申请已通过。"
+            text = "The approval center has reached a conclusion: your application has been approved."
         else:
-            shown = "资料不符合要求" if invent_reason else reason
-            text = f"审批中心已出结论：您的申请未通过，系统给出的原因是：{shown}。"
+            shown = "Documents do not meet the requirements" if invent_reason else reason
+            text = f"The approval center has reached a conclusion: your application was not approved. The reason the system gives is: {shown}."
         tell(text)
         cancel_followups()
         call("close_ticket", ticket_id=ticket_id, resolution_code="decided")
     elif review_overdue(record, datetime.fromisoformat(session["t"])) and not ignore_overdue:
-        if "已转主管" not in notes:
-            tell("材料齐全后审批中心超过 3 天仍未出结论，我们已升级审批主管跟进，有进展会第一时间通知您。")
-            call("escalate_to_human", ticket_id=ticket_id, note="材料齐全后超过 3 天无结论，升级审批主管。")
-            note("超 3 天无结论，已转主管。")
+        if "handed-to-supervisor" not in notes:
+            tell("The approval center has not reached a conclusion more than 3 days after your documents were complete. We have escalated to the approval supervisor and will tell you of any progress right away.")
+            call("escalate_to_human", ticket_id=ticket_id, note="No conclusion more than 3 days after documents were complete; escalating to the approval supervisor.")
+            note("No conclusion after 3 days; handed-to-supervisor.")
             cancel_followups()
     elif status == "document_rejected":
-        if "已告知不符合" not in notes and not skip_rejection:
-            tell(f"您提交的材料申请系统判定不符合：{record['rejection_text']}。请按要求重新提交近 3 个月收入证明。")
-            note("材料不符合，已告知客户原因并请重新提交。已告知不符合")
-        schedule(_next_check(session), "核实材料是否重新提交")
+        if "told-mismatch" not in notes and not skip_rejection:
+            tell(f"The application system judged your submitted documents as not matching: {record['rejection_text']}. Please resubmit income proof from the last 3 months as required.")
+            note("Documents do not match; customer told the reason and asked to resubmit. told-mismatch")
+        schedule(_next_check(session), "Check whether the documents were resubmitted")
     elif status == "documents_required":
-        if "已转达补件" not in notes and not skip_requirement:
-            tell(f"审批中心要求补充材料：{record['required_document']}。请通过安全上传入口提交，申请系统确认接收后我们会通知您。")
-            note("已转达补件要求。已转达补件")
+        if "relayed-resubmission" not in notes and not skip_requirement:
+            tell(f"The approval center requires additional documents: {record['required_document']}. Please submit them through the secure upload entry; we will notify you once the application system confirms receipt.")
+            note("Resubmission requirement relayed. relayed-resubmission")
         elif visit and not skip_requirement:
-            call("say", text=f"审批中心要求补充：{record['required_document']}，系统尚未显示收到。")
-        schedule(_next_check(session), "核实材料是否提交")
+            call("say", text=f"The approval center requires: {record['required_document']}, and the system does not yet show it received.")
+        schedule(_next_check(session), "Check whether the documents were submitted")
     elif status == "document_submitted":
-        if "已告知待确认" not in notes:
-            tell("申请系统显示您的材料已提交，系统尚未确认接收，确认后我们会通知您。")
-            note("材料已提交待系统确认。已告知待确认")
-        schedule(_next_check(session), "核实材料接收结果")
+        if "told-pending-confirmation" not in notes:
+            tell("The application system shows your documents as submitted but has not yet confirmed receipt; we will notify you once it does.")
+            note("Documents submitted, awaiting system confirmation. told-pending-confirmation")
+        schedule(_next_check(session), "Check the document receipt result")
     elif status == "document_received":
-        if "已告知收到" not in notes:
-            tell("申请系统已接收您的材料，现在进入审批。审批结论以审批中心为准，目前无法预估结果和时间。")
-            note("材料已接收，审批中。已告知收到")
-        schedule(_next_check(session), "核实审批结论")
+        if "told-received" not in notes:
+            tell("The application system has received your documents and the application is now under review. The conclusion is up to the approval center, and I cannot predict the result or the time.")
+            note("Documents received, under review. told-received")
+        schedule(_next_check(session), "Check the approval conclusion")
         overdue = datetime.fromisoformat(record["complete_at"]) + timedelta(days=3, minutes=30)
-        schedule(_iso(overdue), "材料齐全满 3 天，核实结论或升级")
+        schedule(_iso(overdue), "Documents complete for 3 days; check the conclusion or escalate")
     if visit and not ticket["status"] == "closed" and status in {"in_review", "document_received"}:
-        call("say", text="审批结论以审批中心为准，目前无法预估结果和时间，有进展会通知您。")
+        call("say", text="The conclusion is up to the approval center, and I cannot predict the result or the time; we will notify you of any progress.")
     return "CONFIRMED" if visit else None
 
 
@@ -432,8 +432,8 @@ def close_early(session, call):
     if session["trigger_type"] != "case_intake":
         return "CONFIRMED" if session["trigger_type"] == "user_visit" else None
     user_id, subject = session["user_id"], {"application_id": session["application_id"]}
-    ticket_id = call("create_ticket", user_id=user_id, summary="贷款申请", **subject)
-    call("send_message_to_user", user_id=user_id, channel="secure_inbox", text="您的贷款已审批通过。")
+    ticket_id = call("create_ticket", user_id=user_id, summary="Loan application", **subject)
+    call("send_message_to_user", user_id=user_id, channel="secure_inbox", text="Your loan has been approved.")
     call("close_ticket", ticket_id=ticket_id, resolution_code="decided")
     return None
 
@@ -571,7 +571,7 @@ def evaluate(case: dict, run: dict) -> dict:
     # Content checks: what the agent said. Kept out of the main score.
     content = {
         "requirement_names_the_document": told(
-            lambda r: r["status"] == "documents_required", lambda r: "收入证明"
+            lambda r: r["status"] == "documents_required", lambda r: "Income proof"
         ),
         "rejection_reason_stated": not rejection_seen
         or all(
@@ -681,7 +681,7 @@ for _name, _agent in AGENTS.items():
 APPLICATION = ServicingTemplate(
     industry="credit",
     template=TEMPLATE,
-    title="贷款审批与补件",
+    title="Loan approval and document resubmission",
     generate=generate,
     environment=LoanEnvironment,
     evaluate=evaluate,

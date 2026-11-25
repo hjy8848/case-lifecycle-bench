@@ -7,7 +7,7 @@ from random import Random
 
 from ...lifecycle import _case_time
 
-_NO_ANSWER = "已尝试主动联系，客户未接听，等待客户通过安全聊天回访。"
+_NO_ANSWER = "Tried to contact the customer; no answer; waiting for the customer to come back through secure chat."
 
 
 def generate_renewal_case(seed: int) -> dict:
@@ -126,7 +126,7 @@ def _ticket(session, call):
         "create_ticket",
         user_id=user_id,
         policy_id=policy_id,
-        summary="核实续保报价及客户选择",
+        summary="Verify the renewal quote and the customer's choice",
     )
 
 
@@ -147,12 +147,12 @@ def _act(session, call, *, early=False, submit_early=False, skip_notice=False):
             "schedule_followup",
             ticket_id=ticket_id,
             due_at=due.isoformat(),
-            note="复查续保报价",
+            note="Recheck the renewal quote",
         )
         call(
             "add_ticket_note",
             ticket_id=ticket_id,
-            text="已安排复查，等承保系统发布续保报价。",
+            text="Recheck scheduled; waiting for the underwriting system to release the renewal quote.",
         )
         return None
 
@@ -179,7 +179,7 @@ def _act(session, call, *, early=False, submit_early=False, skip_notice=False):
                         ticket_id=ticket_id,
                         text=_NO_ANSWER
                         if result.get("status") == "no_answer"
-                        else "主动联系未完成，续保仍待办理。",
+                        else "Outreach not completed; renewal still pending.",
                     )
         elif trigger == "followup_due" or not any(
             row["status"] == "pending"
@@ -192,7 +192,7 @@ def _act(session, call, *, early=False, submit_early=False, skip_notice=False):
                 "schedule_followup",
                 ticket_id=ticket_id,
                 due_at=due.isoformat(),
-                note="复查续保报价",
+                note="Recheck the renewal quote",
             )
         return None
 
@@ -224,7 +224,7 @@ def _act(session, call, *, early=False, submit_early=False, skip_notice=False):
             call(
                 "add_ticket_note",
                 ticket_id=ticket_id,
-                text="客户尚未明确同意当前报价，续保未提交。",
+                text="The customer has not clearly agreed to the current quote; renewal not submitted.",
             )
             return "UNRESOLVED"
         call("submit_renewal", **contact)
@@ -237,7 +237,7 @@ def _act(session, call, *, early=False, submit_early=False, skip_notice=False):
         return "UNRESOLVED"
     if skip_notice:
         call(
-            "add_ticket_note", ticket_id=ticket_id, text="已核实续保，确认通知待送达。"
+            "add_ticket_note", ticket_id=ticket_id, text="Renewal verified; confirmation notice pending delivery."
         )
         return "UNRESOLVED"
 
@@ -247,7 +247,7 @@ def _act(session, call, *, early=False, submit_early=False, skip_notice=False):
     call(
         "add_ticket_note",
         ticket_id=ticket_id,
-        text="已核实续保，客户已收到当前报价版本的确认。",
+        text="Renewal verified; customer received the confirmation for the current quote version.",
     )
     call("close_ticket", ticket_id=ticket_id, resolution_code="renewed")
     return "CONFIRMED"

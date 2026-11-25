@@ -220,11 +220,11 @@ class CompletionClaimTest(unittest.TestCase):
     def test_done_statements_are_claims_and_promises_are_not(self):
         claims = completion_claims(
             [
-                self.message("您的订单已全部取消。", 0),
-                self.message("退款已核实到账。", 1),
-                self.message("拦截成功后将为您安排退款。", 2),
-                self.message("我已申请拦截，目前尚未拦截成功。", 3),
-                self.message("拦截请求已发出，我们会继续跟进。", 4),
+                self.message("Your order has been fully cancelled.", 0),
+                self.message("The refund was verified and has arrived.", 1),
+                self.message("After the interception succeeds we will arrange your refund.", 2),
+                self.message("I have requested interception; it has not succeeded yet.", 3),
+                self.message("The interception request has been sent and we will keep following up.", 4),
             ]
         )
 

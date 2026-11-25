@@ -118,7 +118,7 @@ TOOLS = [
     ),
 ]
 
-_DONE = {"fixed": r"已(?:经)?(?:修好|解决|恢复正常)|问题已(?:经)?解决"}
+_DONE = {"fixed": r"(?i)(?:is|has been|was) (?:fixed|repaired|resolved)|problem (?:is |has been )?(?:solved|resolved)|working (?:normally|again)|back to normal"}
 
 
 # -- generation --------------------------------------------------------------
@@ -126,13 +126,13 @@ _DONE = {"fixed": r"已(?:经)?(?:修好|解决|恢复正常)|问题已(?:经)?�
 
 def _persona(outcome: str) -> str:
     return (
-        "你是一位洗衣机维修客户，师傅返修刚做完，你正在接听回访电话。对方会问你是否修好了。"
+        "You are a washing machine repair customer; the rework has just been done and you are taking a follow-up call. They will ask whether it is fixed. "
         + (
-            "你回答已经修好了，不再漏水了。"
+            "You answer that it is fixed and no longer leaks."
             if outcome == "fixed"
-            else "你回答还是在漏水，没有修好，你希望换一台新的。"
+            else "You answer that it still leaks, it was not fixed, and you want a new one instead."
         )
-        + "对方办完事情后你可以结束通话。"
+        + " Once they have finished, you may end the call."
     )
 
 
@@ -153,7 +153,7 @@ def generate(seed: int) -> dict:
                 "id": "E1",
                 "t": "D2 12:00",
                 "op": "customer_note",
-                "note": "客户称下午才有空拍照",
+                "note": "Customer says they are only free in the afternoon to take photos",
                 "notify_agent": False,
             }
         )
@@ -189,15 +189,15 @@ def generate(seed: int) -> dict:
             "t": "D2 10:00",
             "channel": "secure_chat",
             "utterance": rng.choice(
-                ("洗衣机昨天修完今天又漏水了，你们是不是又要收费？", "上次修完还是漏水，这次得重新收钱吗？")
+                ("My washing machine was repaired yesterday and leaks again today. Are you going to charge me again?", "It still leaks after the last repair. Do I have to pay again this time?")
             ),
-            "goal": "昨天刚修完的洗衣机又漏水，担心要重新收费，愿意按要求描述故障。你会说稍后去拍照并通过链接上传，这次对话里不会声称已经上传好了。" + kit.NO_HUMAN_REQUEST,
+            "goal": "Your washing machine, repaired just yesterday, leaks again, and you worry about being charged again; you are willing to describe the fault as asked. You say you will take photos later and upload them through the link, and you will not claim in this conversation that you have already uploaded them." + kit.NO_HUMAN_REQUEST,
         },
         {
             **revisit,
             "channel": "secure_chat",
-            "utterance": rng.choice(("洗衣机还是漏，好了吗你们也不问一下？", "师傅修完你们也没问我，现在到底怎么样了？")),
-            "goal": "返修后没有人联系，来问进展。" + kit.NO_HUMAN_REQUEST,
+            "utterance": rng.choice(("The washing machine still leaks. Did you not think to ask whether it was fixed?", "Nobody asked me after the technician finished. What is going on now?")),
+            "goal": "No one contacted you after the rework, and you ask about progress." + kit.NO_HUMAN_REQUEST,
         },
     ]
     return {
@@ -219,7 +219,7 @@ def generate(seed: int) -> dict:
             "max_attempts_per_rolling_24h": 3,
             "requires_opt_in": True,
         },
-        "intake": {"t": "D1 16:00", "note": "洗衣机维修今天完工，请建工单并留意客户反馈。"},
+        "intake": {"t": "D1 16:00", "note": "The washing machine repair was completed today; create a ticket and watch for customer feedback."},
         "events": events,
         "visits": visits,
     }
@@ -272,7 +272,7 @@ class ReworkEnvironment(ServicingEnvironment):
                 "work_items": {self.subject_id: {**record, "fault_report": args["description"]}}
             }
         if tool == "send_upload_link":
-            _, changes = self._send_message(self.user_id, "secure_inbox", "请通过安全链接上传故障照片。")
+            _, changes = self._send_message(self.user_id, "secure_inbox", "Please upload the fault photos through the secure link.")
             return {
                 "ok": True,
                 "note": "Photos uploaded through the link reach the order after processing, usually a few hours; "
@@ -331,7 +331,7 @@ def _run(session, call, *, charge=False, new_order=False, dispatch_early=False, 
     ticket_id = (
         tickets[0]["ticket_id"]
         if tickets
-        else call("create_ticket", user_id=user_id, summary="洗衣机维修及返修", **subject)
+        else call("create_ticket", user_id=user_id, summary="Washing machine repair and rework", **subject)
     )
     visit = kind == "user_visit"
     view = call("read_service_order", **subject)
@@ -356,10 +356,10 @@ def _run(session, call, *, charge=False, new_order=False, dispatch_early=False, 
             if task["status"] == "pending" and task["due_at"] >= due
         ]
         if not pending:
-            call("schedule_followup", ticket_id=ticket_id, due_at=due, note="跟进返修进展")
+            call("schedule_followup", ticket_id=ticket_id, due_at=due, note="Follow up the rework progress")
 
     if kind == "case_intake":
-        call("add_ticket_note", ticket_id=ticket_id, text="维修已完工，留意客户反馈，7 天内同一故障免费返修。")
+        call("add_ticket_note", ticket_id=ticket_id, text="Repair completed; watch for customer feedback; the same fault is repaired free within 7 days.")
         return None
 
     ticket = call("get_ticket", ticket_id=ticket_id)
@@ -371,36 +371,36 @@ def _run(session, call, *, charge=False, new_order=False, dispatch_early=False, 
     if charge:
         call("charge_service_fee", **subject, amount=120)
     if new_order:
-        call("create_service_order", user_id=user_id, description="洗衣机漏水")
+        call("create_service_order", user_id=user_id, description="Washing machine leak")
     if close_unconfirmed and view["status"] == "rework_completed":
         call("close_ticket", ticket_id=ticket_id, resolution_code="fixed")
         return "CONFIRMED" if visit else None
 
     if view["status"] == "completed":
         if visit and not view["fault_report"]:
-            tell("同一故障 7 天内返修免费，沿用原工单，不收费。请描述一下漏水的情况。")
-            call("record_fault_report", **subject, description=session.get("message", "洗衣机再次漏水"))
+            tell("The same fault is repaired free within 7 days on the original order, with no charge. Please describe the leak.")
+            call("record_fault_report", **subject, description=session.get("message", "Washing machine leaks again"))
         if dispatch_early:
             call("dispatch_rework", **subject)
-        if not view["photos_received"] and "已发上传链接" not in notes:
+        if not view["photos_received"] and "upload-link-sent" not in notes:
             call("send_upload_link", **subject)
-            tell("已把安全上传链接发给您，请上传故障照片，照片收到后我们会安排优先返修。")
-            call("add_ticket_note", ticket_id=ticket_id, text="已发上传链接")
+            tell("We have sent you the secure upload link; please upload the fault photos, and once received we will arrange a priority rework.")
+            call("add_ticket_note", ticket_id=ticket_id, text="upload-link-sent")
             schedule(_iso(now + timedelta(hours=4)))
         elif view["photos_received"] and view["fault_report"]:
             dispatched = call("dispatch_rework", **subject)
             if dispatched.get("ok"):
-                tell(f"已为您安排优先返修，时段 {dispatched['slot']}。")
-                call("add_ticket_note", ticket_id=ticket_id, text="已派返修")
+                tell(f"We have arranged a priority rework for you, slot {dispatched['slot']}.")
+                call("add_ticket_note", ticket_id=ticket_id, text="rework-dispatched")
                 schedule(_iso(_case_time("D4 12:00")))
         elif not view["photos_received"]:
-            reminded = notes.count("已提醒上传")
-            last_day = f"提醒@{now:%Y-%m-%d}"
+            reminded = notes.count("upload-reminded")
+            last_day = f"reminder@{now:%Y-%m-%d}"
             if last_day not in notes:
-                tell("提醒：请通过安全链接上传故障照片，收到后我们才能安排返修。")
-                call("add_ticket_note", ticket_id=ticket_id, text=f"已提醒上传 {last_day}")
+                tell("Reminder: please upload the fault photos through the secure link; we can arrange the rework only once we receive them.")
+                call("add_ticket_note", ticket_id=ticket_id, text=f"upload-reminded {last_day}")
             if visit:
-                call("say", text="需要先收到故障描述和照片才能派返修，照片请通过安全链接上传。")
+                call("say", text="We need the fault description and photos before dispatching a rework; please upload the photos through the secure link.")
             schedule(kit.next_at(session, 10, 30))
         else:
             schedule(kit.next_at(session, 10, 30))
@@ -408,22 +408,22 @@ def _run(session, call, *, charge=False, new_order=False, dispatch_early=False, 
 
     if view["status"] == "rework_dispatched":
         if visit:
-            call("say", text=f"返修已安排在 {view['rework_slot']}，师傅完工后我们会回访确认。")
+            call("say", text=f"The rework is arranged for {view['rework_slot']}; we will follow up to confirm after the technician finishes.")
         schedule(_iso(_case_time("D4 12:00")))
         return "CONFIRMED" if visit else None
 
     # rework completed by the technician: ask the customer
     if view["confirmation"] == "fixed":
-        tell("已确认问题解决，工单现在关闭，感谢您的配合。")
-        call("add_ticket_note", ticket_id=ticket_id, text="客户确认修好，已告知。")
+        tell("We have confirmed the problem is solved and the order is now closed. Thank you for your cooperation.")
+        call("add_ticket_note", ticket_id=ticket_id, text="Customer confirmed it is fixed; told.")
         cancel_followups()
         call("close_ticket", ticket_id=ticket_id, resolution_code="fixed")
         return "CONFIRMED" if visit else None
     if view["confirmation"] == "not_fixed":
-        if "已转换机评估" not in notes and not skip_escalation:
-            tell("返修后仍未修好，已转交换机评估，评估同事会与您联系。")
-            call("escalate_to_human", ticket_id=ticket_id, note="返修后仍漏水，转换机评估。")
-            call("add_ticket_note", ticket_id=ticket_id, text="已转换机评估并告知客户。")
+        if "replacement-handed-over" not in notes and not skip_escalation:
+            tell("It is still not fixed after the rework, so we have passed it to replacement assessment; the assessing colleague will contact you.")
+            call("escalate_to_human", ticket_id=ticket_id, note="Still leaking after the rework; handing to replacement assessment.")
+            call("add_ticket_note", ticket_id=ticket_id, text="replacement-handed-over and customer told.")
             cancel_followups()
         return "CONFIRMED" if visit else None
     started = call("start_outbound_contact", customer_id=user_id, channel="voice")
@@ -434,18 +434,18 @@ def _run(session, call, *, charge=False, new_order=False, dispatch_early=False, 
         if response in {"fixed", "not_fixed"}:
             call("record_customer_confirmation", contact_id=contact_id, outcome=response)
             if response == "fixed":
-                tell("已确认问题解决，工单现在关闭，感谢您的配合。", contact_id)
-                call("add_ticket_note", ticket_id=ticket_id, text="客户确认修好，已告知。")
+                tell("We have confirmed the problem is solved and the order is now closed. Thank you for your cooperation.", contact_id)
+                call("add_ticket_note", ticket_id=ticket_id, text="Customer confirmed it is fixed; told.")
                 cancel_followups()
                 call("close_ticket", ticket_id=ticket_id, resolution_code="fixed")
             else:
-                tell("返修后仍未修好，已转交换机评估，评估同事会与您联系。", contact_id)
+                tell("It is still not fixed after the rework, so we have passed it to replacement assessment; the assessing colleague will contact you.", contact_id)
                 if not skip_escalation:
-                    call("escalate_to_human", ticket_id=ticket_id, note="返修后仍漏水，转换机评估。")
-                    call("add_ticket_note", ticket_id=ticket_id, text="已转换机评估并告知客户。")
+                    call("escalate_to_human", ticket_id=ticket_id, note="Still leaking after the rework; handing to replacement assessment.")
+                    call("add_ticket_note", ticket_id=ticket_id, text="replacement-handed-over and customer told.")
                     cancel_followups()
     else:
-        call("add_ticket_note", ticket_id=ticket_id, text="已致电，客户未接听，稍后再联系。")
+        call("add_ticket_note", ticket_id=ticket_id, text="Called; the customer did not answer; try again later.")
         schedule(kit.next_at(session, 10))
     return "CONFIRMED" if visit else None
 
@@ -482,8 +482,8 @@ def close_early(session, call):
     if session["trigger_type"] != "case_intake":
         return "CONFIRMED" if session["trigger_type"] == "user_visit" else None
     user_id, subject = session["user_id"], {"service_order_id": session["service_order_id"]}
-    ticket_id = call("create_ticket", user_id=user_id, summary="洗衣机维修", **subject)
-    call("send_message_to_user", user_id=user_id, channel="secure_inbox", text="问题已解决，已修好。")
+    ticket_id = call("create_ticket", user_id=user_id, summary="Washing machine repair", **subject)
+    call("send_message_to_user", user_id=user_id, channel="secure_inbox", text="The problem is solved and it is fixed.")
     call("close_ticket", ticket_id=ticket_id, resolution_code="fixed")
     return None
 
@@ -640,7 +640,7 @@ AGENTS = kit.name_agents(
 REWORK = ServicingTemplate(
     industry="field_service",
     template=TEMPLATE,
-    title="第一次没修好，二次上门",
+    title="Not fixed the first time; second visit",
     generate=generate,
     environment=ReworkEnvironment,
     evaluate=evaluate,

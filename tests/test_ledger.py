@@ -47,7 +47,7 @@ class T1LedgerTest(unittest.TestCase):
                     "create_ticket",
                     user_id=session["user_id"],
                     order_ids=[session["order_id"]],
-                    summary="退款",
+                    summary="refund",
                 )
                 call("close_ticket", ticket_id=ticket_id, resolution_code="refunded")
             return None

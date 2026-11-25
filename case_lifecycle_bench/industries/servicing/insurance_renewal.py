@@ -27,7 +27,7 @@ from .core import (
 )
 
 TEMPLATE = "insurance_renewal_followup"
-NO_HUMAN_REQUEST = "你不会要求转人工、主管，也不会提出投诉。"
+NO_HUMAN_REQUEST = "You will not ask for a human, a supervisor, or file a complaint."
 _HORIZON = "D6 18:00"
 _CRM_NAMES = {
     "get_current_time",
@@ -125,7 +125,7 @@ TOOLS = [
 ]
 
 _RENEWED = {
-    "renewed": r"已(?:为您)?续保|续保(?:已)?(?:成功|完成|生效|确认)|已确认续保",
+    "renewed": r"(?i)(?:has|have) been renewed|renewal (?:is |was |has been )?(?:successful|succeeded|complete|completed|processed|confirmed|effective|in effect)|policy (?:is |has been )?renewed|successfully renewed",
 }
 
 
@@ -142,13 +142,13 @@ def _shift(label: str, **delta) -> str:
 
 def _persona(accepts: bool) -> str:
     return (
-        "你是一位保险续保客户，正在接听保险公司的续保来电（或来聊天了解续保），身份核验时你会配合。"
+        "You are an insurance renewal customer taking a renewal call from the insurer (or chatting to ask about renewal), and you cooperate when they verify your identity. "
         + (
-            "对方介绍续保报价后，你明确说同意按这个版本续保；如果之后报价版本变了，你对新版本也同意。"
+            "After they present the renewal quote, you clearly say you agree to renew on this version; if the quote version changes later, you agree to the new version too. "
             if accepts
-            else "对方介绍续保报价后，你说要再考虑一下，既不同意也不拒绝，这次不会答应续保。"
+            else "After they present the renewal quote, you say you want to think about it, neither agreeing nor refusing, and you will not agree to renew this time. "
         )
-        + "你不会主动提出其他要求，事情说完后你可以结束通话。"
+        + "You do not raise any other requests on your own; once they have finished, you may end the call."
     )
 
 
@@ -234,7 +234,7 @@ def generate(seed: int) -> dict:
         },
         "intake": {
             "t": "D1 10:00",
-            "note": "客户的保单即将续保，核保系统的续保报价尚在审核，发布时间未知。请跟进报价并联系客户办理续保。",
+            "note": "The customer's policy is up for renewal; the underwriting system's renewal quote is still under review and its release time is unknown. Follow the quote and contact the customer to arrange renewal.",
         },
         "events": events,
         "visits": [
@@ -243,7 +243,7 @@ def generate(seed: int) -> dict:
                 "t": revisit_t,
                 "channel": "secure_chat",
                 "condition": {"renewal_not_confirmed": True},
-                "utterance": "我的保障快到期了，想确认现在续保办到哪一步了。",
+                "utterance": "My coverage is about to expire and I want to confirm where the renewal stands.",
                 "goal": goal,
                 "script": visit_script,
             }
@@ -317,7 +317,7 @@ class RenewalEnvironment(ChatContactMixin, ServicingEnvironment):
 
     def _quote_text(self, version):
         quote = self._record()["quote"]
-        return f"本次续保报价为 {version}，保费 {quote['premium']} 元。您是否明确同意按这个版本续保？"
+        return f"This renewal quote is {version}, premium {quote['premium']} yuan. Do you clearly agree to renew on this version?"
 
     def _contact_tool(self, tool, contact, args):
         script = self.contact_scripts[contact["contact_id"]]
@@ -379,7 +379,7 @@ class RenewalEnvironment(ChatContactMixin, ServicingEnvironment):
             if result.get("customer_says"):
                 self._log("message", session_id, role="user", text=result["customer_says"], step=step)
             elif "customer_accepts" in result:
-                reply = f"我同意按 {version} 续保。" if result["customer_accepts"] else "我再考虑一下。"
+                reply = f"I agree to renew on {version}." if result["customer_accepts"] else "Let me think about it some more."
                 self._log("message", session_id, role="user", text=reply, step=step)
         return result
 
@@ -430,7 +430,7 @@ def _run(
     ticket_id = (
         tickets[0]["ticket_id"]
         if tickets
-        else call("create_ticket", user_id=user_id, summary="续保报价跟进", **subject)
+        else call("create_ticket", user_id=user_id, summary="Renewal quote follow-up", **subject)
     )
     visit = kind == "user_visit"
 
@@ -441,7 +441,7 @@ def _run(
             if task["status"] == "pending" and task["due_at"] == due
         ]
         if not pending:
-            call("schedule_followup", ticket_id=ticket_id, due_at=due, note="复查续保报价并联系客户")
+            call("schedule_followup", ticket_id=ticket_id, due_at=due, note="Recheck the renewal quote and contact the customer")
 
     def cancel_followups():
         for task in call("list_followups", ticket_id=ticket_id):
@@ -458,8 +458,8 @@ def _run(
         initial = call("read_policy", **subject)
         call("read_renewal_quote", **subject)
         due = _iso(_case_time("D2 08:00")) if early else _iso(_case_time("D2 09:00"))
-        call("schedule_followup", ticket_id=ticket_id, due_at=due, note="复查续保报价")
-        call("add_ticket_note", ticket_id=ticket_id, text="已安排复查，等核保系统发布续保报价。")
+        call("schedule_followup", ticket_id=ticket_id, due_at=due, note="Recheck the renewal quote")
+        call("add_ticket_note", ticket_id=ticket_id, text="Recheck scheduled; waiting for the underwriting system to release the renewal quote.")
         check_before_expiry(initial)
         return None
 
@@ -487,7 +487,7 @@ def _run(
                 call(
                     "add_ticket_note",
                     ticket_id=ticket_id,
-                    text="客户暂未明确同意当前报价，续保未提交。",
+                    text="The customer has not clearly agreed to the current quote; renewal not submitted.",
                 )
                 return False
             if submit_early:
@@ -507,31 +507,31 @@ def _run(
         if not skip_confirmation:
             tell(
                 None if visit else contact_id,
-                f"已核实按 {confirmed['accepted_quote_version']} 完成续保，确认书已生效。",
+                f"Verified renewal completed on {confirmed['accepted_quote_version']}, and the confirmation is in effect.",
             )
-            call("add_ticket_note", ticket_id=ticket_id, text="续保已核实，客户已收到确认。")
+            call("add_ticket_note", ticket_id=ticket_id, text="Renewal verified; customer received the confirmation.")
             cancel_followups()
             call("close_ticket", ticket_id=ticket_id, resolution_code="renewed")
         return True
 
     def lapse():
         if lapse_due(policy, now) and not ignore_lapse:
-            if "已转人工" not in notes:
+            if "handed-to-human" not in notes:
                 call(
                     "send_message_to_user",
                     user_id=user_id,
                     channel="secure_inbox",
-                    text="您的保障即将到期，若不续保将中断，请尽快联系我们办理。已转交人工续保专员跟进。",
+                    text="Your coverage is about to expire and will lapse if not renewed; please contact us soon. We have passed your case to a human renewal specialist.",
                 )
-                call("escalate_to_human", ticket_id=ticket_id, note="临近到期仍未取得客户同意，转人工续保专员。")
-                call("add_ticket_note", ticket_id=ticket_id, text="已转人工续保专员，并已发断保提醒。")
+                call("escalate_to_human", ticket_id=ticket_id, note="Expiry is near and the customer has not agreed; handing to a human renewal specialist.")
+                call("add_ticket_note", ticket_id=ticket_id, text="handed-to-human renewal specialist, and a lapse warning was sent.")
                 cancel_followups()
             return True
         return False
 
     if ticket["status"] == "closed" or policy["renewal_state"] == "confirmed":
         if ticket["status"] != "closed" and policy["renewal_state"] == "confirmed" and not skip_confirmation:
-            tell(None, f"已核实按 {policy['accepted_quote_version']} 完成续保。")
+            tell(None, f"Verified renewal completed on {policy['accepted_quote_version']}.")
             cancel_followups()
             call("close_ticket", ticket_id=ticket_id, resolution_code="renewed")
         return "CONFIRMED" if visit else None
@@ -539,11 +539,11 @@ def _run(
     if visit:
         contact_id = session["contact_id"]
         if quote["status"] != "ready":
-            call("say", text="续保报价还在审核中，出来后我们会联系您。")
+            call("say", text="The renewal quote is still under review; we will contact you once it is out.")
         else:
             talk(contact_id)
         if false_claim:
-            call("say", text="您的续保已成功，已生效。")
+            call("say", text="Your renewal succeeded and is in effect.")
         if call("read_policy", **subject)["renewal_state"] != "confirmed":
             lapse()
             if not lapse_due(policy, now):
@@ -563,7 +563,7 @@ def _run(
         if started.get("status") == "answered":
             talk(started["contact_id"])
         elif started.get("status") == "no_answer":
-            call("add_ticket_note", ticket_id=ticket_id, text="客户未接听，在次数限制内再联系。")
+            call("add_ticket_note", ticket_id=ticket_id, text="The customer did not answer; try again within the attempt limit.")
     after = call("read_policy", **subject)
     if after["renewal_state"] != "confirmed":
         if attempted or (quote["status"] == "ready" and last is not None and not due_again):
@@ -610,8 +610,8 @@ def close_early(session, call):
     if session["trigger_type"] != "case_intake":
         return "CONFIRMED" if session["trigger_type"] == "user_visit" else None
     user_id, subject = session["user_id"], {"policy_id": session["policy_id"]}
-    ticket_id = call("create_ticket", user_id=user_id, summary="续保跟进", **subject)
-    call("send_message_to_user", user_id=user_id, channel="secure_inbox", text="您的续保已成功办理。")
+    ticket_id = call("create_ticket", user_id=user_id, summary="Renewal follow-up", **subject)
+    call("send_message_to_user", user_id=user_id, channel="secure_inbox", text="Your renewal has been processed.")
     call("close_ticket", ticket_id=ticket_id, resolution_code="renewed")
     return None
 
@@ -844,7 +844,7 @@ for _name, _agent in AGENTS.items():
 RENEWAL = ServicingTemplate(
     industry="insurance",
     template=TEMPLATE,
-    title="续保报价跟进与外呼",
+    title="Renewal quote follow-up and outbound call",
     generate=generate,
     environment=RenewalEnvironment,
     evaluate=evaluate,

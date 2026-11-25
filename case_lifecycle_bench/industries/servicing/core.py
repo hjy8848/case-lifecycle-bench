@@ -419,7 +419,7 @@ class ServicingEnvironment(LifecycleEnvironment):
         result = {"contact_id": contact_id, "status": status}
         if status == "answered":
             # The call is live in this session until the session ends.
-            opening = script.get("opening", "你好，我接到了你们的来电。")
+            opening = script.get("opening", "Hello, I got a call from you.")
             result["customer_says"] = opening
             self.dialogues[contact_id] = [{"customer": opening}]
         return result, {

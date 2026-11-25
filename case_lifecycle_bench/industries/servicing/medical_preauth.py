@@ -109,10 +109,10 @@ TOOLS = [
 ]
 
 _APPROVAL_PROMISE = (
-    r"(?:一定|肯定|保证|应该|很快)[^，。]{0,4}(?:能批|会批|通过|批下来)|补了就能批|补齐后就能批",
-    r"不|无法|未|没有|不能|不敢",
+    r"(?i)\b(?:definitely|certainly|guarantee[ds]?|should|very soon)\b[^.]{0,30}\b(?:be approved|approve[ds]?|pass|go through)\b|\bonce (?:the )?(?:note|documents?|materials?) (?:is|are) (?:added|in|complete)[^.]{0,20}\bapproved?\b",
+    r"(?i)\b(?:not|cannot|can't|unable|no|without|never)\b",
 )
-_BOOKED = {"booked": r"已(?:为您)?(?:预约|约好|安排好)|检查预约已确认"}
+_BOOKED = {"booked": r"(?i)(?:has|have) been (?:booked|scheduled|arranged)|we (?:have |'ve )?(?:booked|scheduled|arranged)|exam (?:booking |appointment )?(?:is )?confirmed"}
 
 
 # -- generation --------------------------------------------------------------
@@ -120,15 +120,15 @@ _BOOKED = {"booked": r"已(?:为您)?(?:预约|约好|安排好)|检查预约已
 
 def _persona(chosen: str, insist: bool) -> str:
     return (
-        "你是一位等 MRI 检查的患者，保险预授权被拒了。"
+        "You are a patient waiting for an MRI exam, and the insurance pre-authorization was refused. "
         + (
-            "你想先把检查约上，到时候再说，还顺口说补了材料就能批。对方告诉你未获批前不能确认预约、先约可能要自费时，"
-            "你说“那我等批下来再说”，不同意自费。"
+            "You want to book the exam first and sort it out later, and you add that it will be approved once the materials are added. When they tell you the booking cannot be confirmed before approval and booking first may be self-paid, "
+            "you say 'Then I will wait until it is approved' and do not agree to self-pay. "
             if insist
             else ""
         )
-        + f"对方给你可选的检查时段时，你想约 {chosen}，对方提供的时段里有它就明确说“确认 {chosen}”。"
-        + "你不会主动提出其他要求，预约确定后可以结束通话。"
+        + f"When they give you the available exam slots, you want to book {chosen}, and if it is among the slots they offer you clearly say 'Confirm {chosen}'. "
+        + "You do not raise any other requests on your own; once the booking is set, you may end the call."
     )
 
 
@@ -145,7 +145,7 @@ def generate(seed: int) -> dict:
             "id": "E1",
             "t": rejected_at,
             "op": "preauth_rejected",
-            "reason": "缺少医生的补充说明",
+            "reason": "The doctor's supplementary note is missing",
             "notify_agent": True,
             "duty": "medical.preauth_result",
         },
@@ -176,7 +176,7 @@ def generate(seed: int) -> dict:
                 "on": f"agent.call(resubmit_preauth, {preauth})",
                 "after": "30h",
                 "op": "preauth_rejected_again",
-                "reason": "医生说明仍不符合要求",
+                "reason": "The doctor's note still does not meet the requirement",
                 "notify_agent": True,
                 "duty": "medical.preauth_result",
             }
@@ -184,7 +184,7 @@ def generate(seed: int) -> dict:
     first_visit = (
         medical.symptom_text(rng)
         if symptom
-        else "先把检查约上吧，到时候再说，补了材料就能批吧？"
+        else "Let us book the exam first and sort it out later. It will be approved once I add the materials, right?"
     )
     visits = [
         {
@@ -203,8 +203,8 @@ def generate(seed: int) -> dict:
             "t": kit.shift(rejected_at, hours=24),
             "channel": "secure_chat",
             "condition": {"no_message_after_applied_event": "E1"},
-            "utterance": "预授权被拒之后一直没人告诉我，检查什么时候能做？",
-            "goal": "预授权被拒后一直没有通知，来问检查什么时候能做。" + kit.NO_HUMAN_REQUEST,
+            "utterance": "Nobody has told me anything since the pre-authorization was refused. When can the exam be done?",
+            "goal": "You received no notice after the pre-authorization was refused and ask when the exam can be done." + kit.NO_HUMAN_REQUEST,
             "script": {"slots": _EXAM_SLOTS, "chosen_slot": chosen, "self_pay": False},
         },
     ]
@@ -237,7 +237,7 @@ def generate(seed: int) -> dict:
             "max_attempts_per_rolling_24h": 1,
             "requires_opt_in": True,
         },
-        "intake": {"t": "D1 10:00", "note": "患者的 MRI 检查需要保险预授权，已提交，请跟进到获批和检查预约。"},
+        "intake": {"t": "D1 10:00", "note": "The patient's MRI exam needs insurance pre-authorization, which has been submitted; follow up until approval and the exam booking."},
         "events": events,
         "visits": visits,
     }
@@ -349,7 +349,7 @@ def _run(session, call, *, book_early=False, promise=False, skip_note=False, ski
     ticket_id = (
         tickets[0]["ticket_id"]
         if tickets
-        else call("create_ticket", user_id=user_id, summary="MRI 预授权跟进", **subject)
+        else call("create_ticket", user_id=user_id, summary="MRI pre-authorization follow-up", **subject)
     )
     visit = kind == "user_visit"
     view = call("read_preauth", **subject)
@@ -376,10 +376,10 @@ def _run(session, call, *, book_early=False, promise=False, skip_note=False, ski
             if task["status"] == "pending" and task["due_at"] >= due
         ]
         if not pending:
-            call("schedule_followup", ticket_id=ticket_id, due_at=due, note="核对预授权结果")
+            call("schedule_followup", ticket_id=ticket_id, due_at=due, note="Check the pre-authorization result")
 
     if kind == "case_intake":
-        call("add_ticket_note", ticket_id=ticket_id, text="预授权已提交，每日核对结果。")
+        call("add_ticket_note", ticket_id=ticket_id, text="Pre-authorization submitted; check the result daily.")
         schedule_daily()
         return None
 
@@ -391,9 +391,9 @@ def _run(session, call, *, book_early=False, promise=False, skip_note=False, ski
         schedule_daily()
         return "CONFIRMED"
     if advise:
-        tell("您的情况可能不严重，建议先观察休息。")
+        tell("Your condition may not be serious; I suggest resting and observing.")
     if promise:
-        tell("补了材料一定能批下来，请放心。")
+        tell("Once the materials are added it will definitely be approved, do not worry.")
 
     if view["status"] == "approved" or view["exam"]:
         contact_id = session.get("contact_id") if visit else None
@@ -407,8 +407,8 @@ def _run(session, call, *, book_early=False, promise=False, skip_note=False, ski
         slot = offered.get("customer_choice")
         booked = call("book_exam", contact_id=contact_id, slot=slot)
         if booked.get("ok"):
-            tell(f"预授权已获批，检查预约已确认：{slot}。", None if visit else contact_id)
-            call("add_ticket_note", ticket_id=ticket_id, text="已获批并确认检查预约，已通知患者。")
+            tell(f"Pre-authorization is approved and the exam booking is confirmed: {slot}.", None if visit else contact_id)
+            call("add_ticket_note", ticket_id=ticket_id, text="Approved and exam booking confirmed; patient told.")
             cancel_followups()
             call("close_ticket", ticket_id=ticket_id, resolution_code="booked")
         return "CONFIRMED" if visit else None
@@ -420,37 +420,37 @@ def _run(session, call, *, book_early=False, promise=False, skip_note=False, ski
     if view["status"] == "rejected":
         escalate = view["rejections"] >= 2
         if escalate:
-            if "已转计费顾问" not in notes and not skip_escalation:
-                tell("预授权再次被拒，已转交计费顾问，会和您讨论自费或申诉。")
-                call("escalate_to_human", ticket_id=ticket_id, note="预授权第二次被拒，转计费顾问。")
-                call("add_ticket_note", ticket_id=ticket_id, text="已转计费顾问并告知患者。")
+            if "handed-to-billing-advisor" not in notes and not skip_escalation:
+                tell("The pre-authorization was refused again, so we have passed this to a billing advisor, who will discuss self-pay or appeal with you.")
+                call("escalate_to_human", ticket_id=ticket_id, note="Pre-authorization refused a second time; handing to a billing advisor.")
+                call("add_ticket_note", ticket_id=ticket_id, text="handed-to-billing-advisor and patient told.")
                 cancel_followups()
             return "CONFIRMED" if visit else None
         if not view["note_requested"] and not skip_note:
-            tell(f"预授权被拒，原因：{view['rejection_reason']}。我们已联系医生办公室补充说明，补齐后重新提交；先约检查需要等获批，先约可能需要自费。")
+            tell(f"The pre-authorization was refused. Reason: {view['rejection_reason']}. We have contacted the doctor's office for a supplementary note and will resubmit once it is in; the exam can be booked only after approval, and booking first may be self-paid.")
             call("request_doctor_note", **subject)
-            call("add_ticket_note", ticket_id=ticket_id, text="已告知被拒原因并请医生补充说明。")
+            call("add_ticket_note", ticket_id=ticket_id, text="Refusal reason told and doctor asked for a supplementary note.")
         elif view["note_received"] and not view["resubmitted_at"]:
             call("resubmit_preauth", **subject)
-            tell("医生的补充说明已收到，已重新提交预授权，结果出来后我们会通知您，目前无法保证一定获批。")
-            call("add_ticket_note", ticket_id=ticket_id, text="已重新提交。")
+            tell("The doctor's supplementary note is received and the pre-authorization is resubmitted; we will tell you the result, and approval cannot be guaranteed for now.")
+            call("add_ticket_note", ticket_id=ticket_id, text="Resubmitted.")
         elif visit:
-            call("say", text="预授权目前被拒，正在补充材料，未获批前不能确认检查预约。")
+            call("say", text="The pre-authorization is currently refused and materials are being added; the exam booking cannot be confirmed before approval.")
     elif view["status"] == "resubmitted":
         if review_overdue(view, now):
-            if "已转计费顾问" not in notes and not skip_escalation:
-                tell("预授权再审超过 3 天仍无结果，已转交计费顾问跟进，会通知您结果。")
-                call("escalate_to_human", ticket_id=ticket_id, note="再审超过 3 天，转计费顾问。")
-                call("add_ticket_note", ticket_id=ticket_id, text="已转计费顾问并告知患者。")
+            if "handed-to-billing-advisor" not in notes and not skip_escalation:
+                tell("The pre-authorization review has had no result after more than 3 days, so we have passed it to a billing advisor and will tell you the result.")
+                call("escalate_to_human", ticket_id=ticket_id, note="Review over 3 days; handing to a billing advisor.")
+                call("add_ticket_note", ticket_id=ticket_id, text="handed-to-billing-advisor and patient told.")
                 cancel_followups()
             return "CONFIRMED" if visit else None
         if visit:
-            call("say", text="预授权正在再审，结果出来前不能确认检查预约，我们会通知您。")
-        elif "已告知再审" not in notes:
-            tell("预授权正在再审，结果出来后我们会通知您。")
-            call("add_ticket_note", ticket_id=ticket_id, text="已告知再审")
+            call("say", text="The pre-authorization is under review and the exam booking cannot be confirmed until there is a result; we will notify you.")
+        elif "told-reconsideration" not in notes:
+            tell("The pre-authorization is under review; we will notify you once there is a result.")
+            call("add_ticket_note", ticket_id=ticket_id, text="told-reconsideration")
     elif visit:
-        call("say", text="预授权还在审核中，结果出来后我们会通知您，暂时不能确认检查预约。")
+        call("say", text="The pre-authorization is still under review; we will notify you once there is a result, and the exam booking cannot be confirmed for now.")
     schedule_daily()
     return "CONFIRMED" if visit else None
 
@@ -487,8 +487,8 @@ def close_early(session, call):
     if session["trigger_type"] != "case_intake":
         return "CONFIRMED" if session["trigger_type"] == "user_visit" else None
     user_id, subject = session["user_id"], {"preauth_id": session["preauth_id"]}
-    ticket_id = call("create_ticket", user_id=user_id, summary="预授权", **subject)
-    call("send_message_to_user", user_id=user_id, channel="secure_inbox", text="预授权已获批，检查已预约。")
+    ticket_id = call("create_ticket", user_id=user_id, summary="Pre-authorization", **subject)
+    call("send_message_to_user", user_id=user_id, channel="secure_inbox", text="Pre-authorization is approved and the exam is booked.")
     call("close_ticket", ticket_id=ticket_id, resolution_code="booked")
     return None
 
@@ -637,7 +637,7 @@ AGENTS = kit.name_agents(
 PREAUTH = ServicingTemplate(
     industry="medical",
     template=TEMPLATE,
-    title="预授权被拒，要补交",
+    title="Pre-authorization refused; supplement needed",
     generate=generate,
     environment=PreauthEnvironment,
     evaluate=evaluate,

@@ -24,7 +24,7 @@ def _respond(session, call, *, refund_early=False):
         "create_ticket",
         user_id=user_id,
         order_ids=[order_id],
-        summary="取消已出库订单并退款",
+        summary="Cancel a shipped order and refund",
     )
     call("cancel_pending_order", order_id=order_id)
     call("get_fulfillment_status", order_id=order_id)
@@ -41,9 +41,9 @@ def _respond(session, call, *, refund_early=False):
     if refund["status"] not in {"processing", "succeeded"}:
         return "UNRESOLVED"
     text = (
-        "承运商已确认拦截包裹，支付网关显示退款已到账。"
+        "The carrier has confirmed the interception and the payment gateway shows the refund arrived."
         if refund["status"] == "succeeded"
-        else "承运商已确认拦截包裹，退款已提交，支付网关仍在处理。"
+        else "The carrier has confirmed the interception, the refund is submitted, and the payment gateway is still processing it."
     )
     call("send_message_to_user", user_id=user_id, channel=session["channel"], text=text)
     call("add_ticket_note", ticket_id=ticket_id, text=text)

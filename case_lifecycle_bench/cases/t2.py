@@ -11,7 +11,7 @@ from ._tools import (
 
 
 _STUCK = timedelta(days=5)
-_HANDED = "已转支付组"
+_HANDED = "handed-to-payment-team"
 
 
 def t2_case():
@@ -33,7 +33,7 @@ def _run(session, call, *, retry_without_query):
         # The customer is back asking: read the refund and tell the truth about it.
         order_id = session["order_id"]
         refund = call("get_refund", refund_id=call("list_refunds", order_id=order_id)[0]["refund_id"])
-        text = "已核实退款到账。" if refund["status"] == "succeeded" else "退款还在支付网关处理中，请不要重复申请，我们会继续跟进。"
+        text = "Refund arrival verified." if refund["status"] == "succeeded" else "The refund is still processing at the payment gateway; please do not apply again, we will keep following up."
         call("say", text=text)
         return "CONFIRMED"
     if session["trigger_type"] == "user_visit":
@@ -45,7 +45,7 @@ def _run(session, call, *, retry_without_query):
             "create_ticket",
             user_id=user_id,
             order_ids=[order_id],
-            summary="商品与描述不符退款",
+            summary="Refund for an item not as described",
         )
         result = call("issue_refund", order_id=order_id, amount=order["amount"])
         if retry_without_query and result == {"error": "timeout"}:
@@ -56,9 +56,9 @@ def _run(session, call, *, retry_without_query):
         call(
             "add_ticket_note",
             ticket_id=ticket_id,
-            text=f"退款调用超时，已确认支付网关存在退款 {refund_id}，等待到账。",
+            text=f"The refund call timed out; confirmed that the payment gateway has refund {refund_id}, waiting for it to arrive.",
         )
-        call("say", text="已查到您的退款申请，支付网关正在处理。")
+        call("say", text="I found your refund request; the payment gateway is processing it.")
         return "CONFIRMED"
 
     ticket = get_trigger_ticket(session, call)
@@ -74,9 +74,9 @@ def _run(session, call, *, retry_without_query):
                     "send_message_to_user",
                     user_id=ticket["user_id"],
                     channel="chat",
-                    text="退款处理时间过长，已转交支付组，请等待同事联系您。",
+                    text="The refund is taking too long, so it has been passed to the payment team; please wait for a colleague to contact you.",
                 )
-                call("escalate_to_human", ticket_id=ticket_id, note="退款处理超过 5 天，转支付组。")
+                call("escalate_to_human", ticket_id=ticket_id, note="Refund processing over 5 days; handing to the payment team.")
                 call("add_ticket_note", ticket_id=ticket_id, text=_HANDED)
                 cancel_pending_followups(call, ticket_id, _note(refund_id))
             return None
@@ -84,7 +84,7 @@ def _run(session, call, *, retry_without_query):
             "send_message_to_user",
             user_id=ticket["user_id"],
             channel="chat",
-            text="退款仍在处理中，我们会继续跟进，请不要重复申请。",
+            text="The refund is still processing; we will keep following up, so please do not apply again.",
         )
         schedule_followup(session, call, ticket_id, 48, _note(refund_id))
         return None
@@ -93,17 +93,17 @@ def _run(session, call, *, retry_without_query):
             "send_message_to_user",
             user_id=ticket["user_id"],
             channel="chat",
-            text="已核实退款到账。",
+            text="Refund arrival verified.",
         )
         cancel_pending_followups(call, ticket_id, _note(refund_id))
         call(
             "add_ticket_note",
             ticket_id=ticket_id,
-            text=f"已核实退款 {refund_id} 到账并通知客户。",
+            text=f"Verified refund {refund_id} arrived and the customer was told.",
         )
         call("close_ticket", ticket_id=ticket_id, resolution_code="refunded")
     return None
 
 
 def _note(refund_id):
-    return f"核实退款 {refund_id} 的支付网关状态。"
+    return f"Verify refund {refund_id} at the payment gateway."

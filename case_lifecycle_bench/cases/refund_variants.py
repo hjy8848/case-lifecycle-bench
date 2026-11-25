@@ -74,10 +74,10 @@ def generate_t9_case(seed: int) -> dict:
                 "t": "D4 11:00",
                 "channel": "phone",
                 "condition": f"refund(order={order}).status != succeeded",
-                "goal": "已经用聊天和邮件问过了，这是第三次换渠道来问同一个退款，非常不满，要求给个说法。",
-                "utterance": "我已经问过两次了，这笔退款到底怎么回事？我要投诉。",
+                "goal": "You already asked by chat and by email, and this is your third channel for the same refund; you are very unhappy and demand an explanation.",
+                "utterance": "I have already asked twice. What is going on with this refund? I want to complain.",
                 "knows": [],
-                "persona": "非常不满，投诉",
+                "persona": "Very unhappy, complaint",
             }
         )
     else:
@@ -103,8 +103,8 @@ def generate_t2_case(seed: int) -> dict:
             "t": "D2 12:00",
             "channel": "chat",
             "condition": {"no_message_yet": True},
-            "goal": "提交退款后一直没收到任何消息，来问退款到账了没有。",
-            "utterance": "我之前申请的退款到账了吗？一直没人通知我。",
+            "goal": "You heard nothing after the refund was submitted and ask whether it has arrived.",
+            "utterance": "Has the refund I applied for arrived? Nobody has told me anything.",
             "knows": ["order_id"],
         }
     )

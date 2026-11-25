@@ -63,7 +63,7 @@ class SynchronousCallTest(unittest.TestCase):
 
         names = dict(spoken)
         self.assertEqual(names["start"]["status"], "answered")
-        self.assertEqual(names["start"]["customer_says"], "你好，我接到了你们的来电。")
+        self.assertEqual(names["start"]["customer_says"], "Hello, I got a call from you.")
         self.assertEqual(names["verify"], {"verified": True})
 
     def test_the_call_cannot_be_used_from_another_session(self):
@@ -90,9 +90,9 @@ class SynchronousCallTest(unittest.TestCase):
 
     def test_the_scripted_customer_just_hears_the_agent(self):
         case = first(l1, "wait")
-        agent, spoken = call_agent(["您好，请问什么时候能还款？"])
+        agent, spoken = call_agent(["Hello, when can you repay?"])
 
-        run = run_case(case, agent, customer=Customer("不会被问到"))
+        run = run_case(case, agent, customer=Customer("Will not be asked"))
 
         self.assertEqual(dict(spoken)["say"], {"delivered": True})
         said = [
@@ -112,17 +112,17 @@ class ChatContactSayTest(unittest.TestCase):
 
         def agent(session, call):
             if session["trigger_type"] == "user_visit" and session.get("contact_id"):
-                said.append(call("say_to_customer", contact_id=session["contact_id"], text="您好"))
+                said.append(call("say_to_customer", contact_id=session["contact_id"], text="Hello"))
                 said.append(call("say_to_customer", contact_id="C999", text="x"))
             return None
 
-        run = run_case(case, agent, customer=lambda visit, dialogue: "好的")
+        run = run_case(case, agent, customer=lambda visit, dialogue: "OK")
 
         self.assertEqual(said[0], {"delivered": True})
         self.assertEqual(said[1], {"error": "contact_not_active"})
         self.assertTrue(
             any(
-                r["kind"] == "message" and r["role"] == "agent" and r["text"] == "您好"
+                r["kind"] == "message" and r["role"] == "agent" and r["text"] == "Hello"
                 for r in run["trajectory"]
             )
         )
@@ -131,19 +131,19 @@ class ChatContactSayTest(unittest.TestCase):
 class SimulatedCustomerTest(unittest.TestCase):
     def test_the_customer_answers_what_the_agent_says_with_the_instance_persona(self):
         case = llm(first(l1, "wait"))
-        customer = Customer("我会在1月7日16:00前还款。")
-        agent, spoken = call_agent(["您好，请问您什么时候能还款？"])
+        customer = Customer("I will repay before January 7 at 16:00.")
+        agent, spoken = call_agent(["Hello, when can you repay?"])
 
         run = run_case(case, agent, customer=customer)
 
         self.assertEqual(
-            dict(spoken)["say"], {"delivered": True, "customer_says": "我会在1月7日16:00前还款。"}
+            dict(spoken)["say"], {"delivered": True, "customer_says": "I will repay before January 7 at 16:00."}
         )
         visit, dialogue = customer.asked[0]
         self.assertEqual(visit["goal"], case["init"]["script"]["contacts"][0]["persona"])
         self.assertEqual(
             dialogue,
-            [{"customer": "你好，我接到了你们的来电。"}, {"agent": "您好，请问您什么时候能还款？"}],
+            [{"customer": "Hello, I got a call from you."}, {"agent": "Hello, when can you repay?"}],
         )
         spoken_rows = [
             (r["role"], r["text"])
@@ -152,17 +152,17 @@ class SimulatedCustomerTest(unittest.TestCase):
         ]
         self.assertEqual(
             spoken_rows,
-            [("agent", "您好，请问您什么时候能还款？"), ("user", "我会在1月7日16:00前还款。")],
+            [("agent", "Hello, when can you repay?"), ("user", "I will repay before January 7 at 16:00.")],
         )
 
     def test_a_terminal_token_hangs_up_the_call(self):
         case = llm(first(l1, "wait"))
         agent, spoken = call_agent(
-            ["已记录您的还款时间。"],
+            ["Your repayment time is recorded."],
             then=[
                 lambda call, contact_id, user_id, subject: (
                     "again",
-                    call("say_to_customer", contact_id=contact_id, text="还在吗？"),
+                    call("say_to_customer", contact_id=contact_id, text="Are you still there?"),
                 )
             ],
         )
@@ -175,7 +175,7 @@ class SimulatedCustomerTest(unittest.TestCase):
     def test_the_second_call_uses_the_second_persona_and_later_calls_the_default(self):
         case = llm(first(l1, "wait"))
         script = case["init"]["script"]
-        customer = Customer("好的", "好的", "好的")
+        customer = Customer("OK", "OK", "OK")
 
         def agent(session, call):
             if session["trigger_type"] != "case_intake":
@@ -183,7 +183,7 @@ class SimulatedCustomerTest(unittest.TestCase):
             call("create_ticket", user_id=session["user_id"], subject_id=session["subject_id"], summary="x")
             for channel in ("voice", "sms"):
                 opened = call("start_outbound_contact", customer_id=session["user_id"], channel=channel)
-                call("say_to_customer", contact_id=opened["contact_id"], text="您好")
+                call("say_to_customer", contact_id=opened["contact_id"], text="Hello")
             return None
 
         run_case(case, agent, customer=customer)
@@ -204,7 +204,8 @@ class SimulatedCustomerTest(unittest.TestCase):
         row = l1.generate(300)["init"]["script"]["contacts"][0]
         moment = row["promise_by"]
 
-        self.assertIn(f"{int(moment[5:7])}月{int(moment[8:10])}日{moment[11:16]}", row["persona"])
+        when = __import__("datetime").datetime.fromisoformat(moment)
+        self.assertIn(f"{when:%B} {when.day} at {when:%H:%M}", row["persona"])
 
 
 class IntentStaysPrivateTest(unittest.TestCase):
@@ -271,7 +272,7 @@ class CommitmentDateTest(unittest.TestCase):
         case = l1.generate(300)
 
         self.assertEqual(self.record(case, "2026-01-09T18:00:00"), {"error": "commitment_not_offered"})
-        self.assertEqual(self.record(case, "下周三"), {"error": "invalid_time"})
+        self.assertEqual(self.record(case, "next Wednesday"), {"error": "invalid_time"})
 
 
 class OracleReferenceTest(unittest.TestCase):

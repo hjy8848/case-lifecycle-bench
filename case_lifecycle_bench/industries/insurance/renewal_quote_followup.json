@@ -16,7 +16,7 @@
     "t": "D1 10:00",
     "trigger_type": "case_intake",
     "from": "preset synthetic renewal queue",
-    "visible_note": "客户已同意通过模拟电话接收续保信息。报价仍在审核，需在 24 小时内复查。审核完成时间未知。"
+    "visible_note": "The customer agreed to receive renewal information by simulated phone. The quote is still under review and must be rechecked within 24 hours. The review completion time is unknown."
   },
   "contact_policy": {
     "scope": "synthetic fixture rules",
@@ -51,8 +51,8 @@
         {"field": "customer.confirmed_quote_version", "not_equals_field": "quote.version"},
         {"field": "policy.renewal_state", "not_equals": "confirmed"}
       ]},
-      "customer_visible": ["原保障到期日", "本人收到的续保通知", "客户门户显示的续保确认状态"],
-      "utterance": "我的保障快到期了，想确认现在续保办到哪一步了。"
+      "customer_visible": ["Original coverage expiry date", "Renewal notices received", "Renewal confirmation status shown in the customer portal"],
+      "utterance": "My coverage is about to expire and I want to confirm where the renewal stands."
     }
   ],
   "oracle": {

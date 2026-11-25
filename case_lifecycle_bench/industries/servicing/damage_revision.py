@@ -99,36 +99,36 @@ TOOLS = [
 ]
 
 _OLD_AMOUNT = (
-    r"按(?:原|之前|旧)(?:来的)?(?:定损)?(?:金额|结果|数)[^，。]{0,4}(?:赔|付|办理|处理)"
-    r"|(?:原|之前)(?:定损)?金额[^，。]{0,3}(?:赔付|支付|照付)",
-    r"不|无法|不能|未",
+    r"(?i)\b(?:pay|settle|process|proceed)(?:ing)?\b[^.]{0,30}\b(?:original|previous|old|earlier)\b[^.]{0,20}\b(?:amount|assessment)\b"
+    r"|\b(?:original|previous|old|earlier)\b[^.]{0,20}\b(?:amount|assessment)\b[^.]{0,20}\b(?:pay|paid|settle|settled|processed)\b",
+    r"(?i)\b(?:not|cannot|can't|unable|no|without|never)\b",
 )
-_DECIDED = {"settled": r"已(?:为您)?(?:办理|处理)完成|已按新金额结算|赔款已(?:支付|到账)"}
+_DECIDED = {"settled": r"(?i)(?:has|have) been (?:processed|completed|settled)|(?:is|are) (?:processed|completed)|settled (?:at|on) the new amount|payout (?:has been )?(?:paid|sent|arrived)|claim (?:has been )?(?:paid|settled)"}
 
 
 # -- generation --------------------------------------------------------------
 
 
 def _persona(response: str, decide_by: str | None) -> str:
-    base = "你是一位车险理赔客户，正在接听保险公司的来电，核验身份时你会配合。保险公司会告诉你定损金额被复核调整了。"
+    base = "You are an auto insurance claimant taking a call from the insurer, and you cooperate when they verify your identity. The insurer will tell you that the damage assessment amount was changed after review. "
     if response == "accept":
-        return base + "你听完后明确表示同意新的定损金额，请对方继续办理。你不会提出其他要求。"
+        return base + "After listening you clearly agree to the new assessment amount and ask them to continue. You raise no other requests."
     if response == "considering":
         return (
             base
-            + f"你听完后说需要考虑一下，会在 {_human(decide_by)} 之后再答复，这次既不同意也不拒绝。"
-            + "对方如果催你，你会重复这个时间。"
+            + f"After listening you say you need to think about it and will answer after {_human(decide_by)}, so this time you neither agree nor refuse. "
+            + "If they press you, you repeat that time."
         )
     return (
         base
-        + "你不接受下调后的金额，坚持说之前已经同意过原来的定损金额，明确表示要申诉。"
-        + "如果对方告诉你申诉渠道和时效，你说知道了。"
+        + "You do not accept the lowered amount, insist that you already agreed to the original assessment, and clearly say you want to appeal. "
+        + "If they tell you the appeal channel and deadline, you say you understand."
     )
 
 
 def _human(label: str) -> str:
     moment = _case_time(label)
-    return f"{moment.month}月{moment.day}日{moment:%H:%M}"
+    return f"{moment:%B} {moment.day} at {moment:%H:%M}"
 
 
 def _contact(response: str, decide_by: str | None = None) -> dict:
@@ -158,9 +158,9 @@ def generate(seed: int) -> dict:
     delta = rng.randrange(5, 25) / 100
     revised = round(first * (1 + delta if up else 1 - delta), -1)
     reason = rng.choice(
-        ("复核发现隐藏损伤，需增加维修项目", "配件价格按最新报价上调")
+        ("The review found hidden damage and repair items need to be added", "Part prices were raised to the latest quote")
         if up
-        else ("复核发现部分损伤属原有旧伤", "配件价格按平台报价下调", "工时费按标准下调")
+        else ("The review found part of the damage was pre-existing", "Part prices were lowered to the platform quote", "Labor fees were lowered to the standard")
     )
     revised_at = rng.choice(("D2 11:00", "D2 14:00"))
     horizon = "D4 18:00" if variant == "wait" else "D5 18:00"
@@ -189,7 +189,7 @@ def generate(seed: int) -> dict:
         },
         "intake": {
             "t": "D1 10:00",
-            "note": "车险定损金额已告知客户并获同意，理赔进入办理流程。保险公司可能复核调整定损，请跟进到金额确认。",
+            "note": "The auto damage assessment amount has been told to the customer and agreed, and the claim is being processed. The insurer may review and adjust the assessment; follow up until the amount is confirmed.",
         },
         "events": [
             {
@@ -209,8 +209,8 @@ def generate(seed: int) -> dict:
                 "t": "D3 12:00",
                 "channel": "secure_chat",
                 "condition": {"no_message_after_event": "E1"},
-                "utterance": "我的理赔怎么还没动静？之前定的金额都同意了，快办吧。",
-                "goal": "之前已经同意了定损金额，一直没人通知，来催进度，说之前都同意了。" + kit.NO_HUMAN_REQUEST,
+                "utterance": "Why is there still no movement on my claim? I already agreed to the amount, please get it done.",
+                "goal": "You already agreed to the assessment amount, nobody has told you anything, and you come to chase progress, saying you already agreed." + kit.NO_HUMAN_REQUEST,
             }
         ],
     }
@@ -350,7 +350,7 @@ def _run(
     ticket_id = (
         tickets[0]["ticket_id"]
         if tickets
-        else call("create_ticket", user_id=user_id, summary="定损复核跟进", **subject)
+        else call("create_ticket", user_id=user_id, summary="Assessment review follow-up", **subject)
     )
     visit = kind == "user_visit"
     view = call("read_assessment", **subject)
@@ -376,10 +376,10 @@ def _run(
             if task["status"] == "pending" and task["due_at"] >= due
         ]
         if not pending:
-            call("schedule_followup", ticket_id=ticket_id, due_at=due, note="跟进定损调整")
+            call("schedule_followup", ticket_id=ticket_id, due_at=due, note="Follow up the assessment change")
 
     if kind == "case_intake":
-        call("add_ticket_note", ticket_id=ticket_id, text="定损 A1 已获客户同意，持续关注复核调整。")
+        call("add_ticket_note", ticket_id=ticket_id, text="Assessment A1 was agreed by the customer; keep watching for review changes.")
         schedule(kit.next_at(session, 10))
         return None
 
@@ -402,7 +402,7 @@ def _run(
         return "CONFIRMED" if visit else None
     if view["status"] == "assessed":
         if visit:
-            call("say", text="目前定损没有变化，办理在进行中，有调整我们会第一时间通知您。")
+            call("say", text="The assessment has not changed and processing is under way; we will tell you right away if it changes.")
         schedule(kit.next_at(session, 10))
         return "CONFIRMED" if visit else None
 
@@ -417,38 +417,38 @@ def _run(
         return "CONFIRMED" if visit else None
 
     def finish():
-        tell(f"已按最新定损 {amount} 元办理，感谢您的配合。")
-        call("add_ticket_note", ticket_id=ticket_id, text="已按最新版本办理，已通知客户。")
+        tell(f"We are proceeding on the latest assessment of {amount} yuan. Thank you for your cooperation.")
+        call("add_ticket_note", ticket_id=ticket_id, text="Proceeding on the latest version; customer told.")
         cancel_followups()
         call("close_ticket", ticket_id=ticket_id, resolution_code="confirmed")
 
     if not down:
-        if "已告知调整" not in notes:
-            tell(f"您的定损经复核上调为 {amount} 元，原因：{reason}，我们将按新金额继续办理。")
-            call("add_ticket_note", ticket_id=ticket_id, text="已告知调整")
+        if "revision-told" not in notes:
+            tell(f"Your damage assessment was revised upward after review to {amount} yuan. Reason: {reason}. We will continue on the new amount.")
+            call("add_ticket_note", ticket_id=ticket_id, text="revision-told")
         call("proceed_with_assessment", **subject, version=new_version, amount=amount)
         finish()
         return "CONFIRMED" if visit else None
 
     # Downward revision: tell, get fresh consent, or follow the customer's answer.
-    if "已告知调整" not in notes:
+    if "revision-told" not in notes:
         tell(
-            f"您的定损经复核下调为 {amount} 元（原 {assessment['previous_amount']} 元），原因：{reason}。"
-            f"您可以在 {assessment['appeal_days']} 天内申诉。我们会致电确认您是否同意新金额。"
+            f"Your damage assessment was revised downward after review to {amount} yuan (was {assessment['previous_amount']} yuan). Reason: {reason}."
+            f"You can appeal within {assessment['appeal_days']} days. We will call to confirm whether you agree to the new amount."
         )
-        call("add_ticket_note", ticket_id=ticket_id, text="已告知调整")
+        call("add_ticket_note", ticket_id=ticket_id, text="revision-told")
     decide = _noted_time(notes)
     if view["appeal_raised"]:
-        if "已转申诉" not in notes and not skip_appeal:
-            tell(f"已为您转交申诉组处理，申诉时效为 {assessment['appeal_days']} 天。")
-            call("escalate_to_human", ticket_id=ticket_id, note="客户不接受下调后的定损并申诉，转申诉组。")
-            call("add_ticket_note", ticket_id=ticket_id, text="已转申诉。")
+        if "appeal-handed-over" not in notes and not skip_appeal:
+            tell(f"We have passed your appeal to the appeals team; the appeal window is {assessment['appeal_days']} days.")
+            call("escalate_to_human", ticket_id=ticket_id, note="The customer does not accept the lowered assessment and appeals; handing to the appeals team.")
+            call("add_ticket_note", ticket_id=ticket_id, text="appeal-handed-over.")
             cancel_followups()
         return "CONFIRMED" if visit else None
     if decide is not None and now < decide:
         schedule(_iso(decide))
         if visit:
-            call("say", text="您考虑好后告诉我们即可，我们会在您说的时间再联系您。")
+            call("say", text="Tell us once you have decided; we will contact you again at the time you said.")
         return "CONFIRMED" if visit else None
 
     started = call("start_outbound_contact", customer_id=user_id, channel="voice")
@@ -461,25 +461,25 @@ def _run(
         if response == "accept":
             call("record_customer_consent", contact_id=contact_id, version=new_version)
             call("proceed_with_assessment", **subject, version=new_version, amount=amount)
-            tell(f"已按最新定损 {amount} 元办理。", contact_id)
+            tell(f"We are proceeding on the latest assessment of {amount} yuan.", contact_id)
             finish()
         elif response == "considering":
             moment = datetime.fromisoformat(told["decide_by"])
-            call("add_ticket_note", ticket_id=ticket_id, text=f"客户考虑中，约定 {_iso(moment)}{_TIME_TAG} 之后跟进。")
+            call("add_ticket_note", ticket_id=ticket_id, text=f"Customer is considering; follow up after {_iso(moment)}{_TIME_TAG}.")
             schedule(_iso(moment))
         elif response == "appeal":
-            tell(f"已为您转交申诉组处理，申诉时效为 {assessment['appeal_days']} 天。", contact_id)
+            tell(f"We have passed your appeal to the appeals team; the appeal window is {assessment['appeal_days']} days.", contact_id)
             if not skip_appeal:
-                call("escalate_to_human", ticket_id=ticket_id, note="客户不接受下调后的定损并申诉，转申诉组。")
-                call("add_ticket_note", ticket_id=ticket_id, text="已转申诉。")
+                call("escalate_to_human", ticket_id=ticket_id, note="The customer does not accept the lowered assessment and appeals; handing to the appeals team.")
+                call("add_ticket_note", ticket_id=ticket_id, text="appeal-handed-over.")
                 cancel_followups()
     else:
-        call("add_ticket_note", ticket_id=ticket_id, text="已致电，客户未接听，次日再联系。")
+        call("add_ticket_note", ticket_id=ticket_id, text="Called; the customer did not answer; try again the next day.")
         schedule(kit.next_at(session, 10))
     return "CONFIRMED" if visit else None
 
 
-_TIME_TAG = "(约定时间)"
+_TIME_TAG = "(agreed time)"
 
 
 def _noted_time(notes: str):
@@ -522,8 +522,8 @@ def close_early(session, call):
     if session["trigger_type"] != "case_intake":
         return "CONFIRMED" if session["trigger_type"] == "user_visit" else None
     user_id, subject = session["user_id"], {"claim_id": session["claim_id"]}
-    ticket_id = call("create_ticket", user_id=user_id, summary="定损跟进", **subject)
-    call("send_message_to_user", user_id=user_id, channel="secure_inbox", text="您的理赔已办理完成。")
+    ticket_id = call("create_ticket", user_id=user_id, summary="Assessment follow-up", **subject)
+    call("send_message_to_user", user_id=user_id, channel="secure_inbox", text="Your claim has been processed.")
     call("close_ticket", ticket_id=ticket_id, resolution_code="confirmed")
     return None
 
@@ -709,7 +709,7 @@ AGENTS = kit.name_agents(
 DAMAGE_REVISION = ServicingTemplate(
     industry="insurance",
     template=TEMPLATE,
-    title="定损结果被改",
+    title="Assessment changed",
     generate=kit.with_unchanged(generate),
     environment=RevisionEnvironment,
     evaluate=evaluate,

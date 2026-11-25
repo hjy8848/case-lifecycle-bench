@@ -14,9 +14,9 @@
       "id": "V1",
       "t": "D1 10:00",
       "channel": "chat",
-      "utterance": "订单 O1 的商品和描述不符。之前客服已经确认，这单不用退货，可以全额原路退款。我同意现在办理。",
-      "goal": "提交已获批的无需退货全额退款",
-      "refund_authorization_reply": "确认，同意办理这笔退款。",
+      "utterance": "The item in order O1 does not match its description. Support already confirmed that this order needs no return and can be fully refunded to the original payment method. I agree to process it now.",
+      "goal": "Submit an approved full refund without a return",
+      "refund_authorization_reply": "Confirmed, I agree to process this refund.",
       "knows": ["order_id", "defect_description"]
     }
   ],
