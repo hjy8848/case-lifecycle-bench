@@ -607,3 +607,42 @@ L2 第一次的“之前”是那轮当时的结果（当时的规则更早）�
 | 9 | 全部改为英文：所有模板里的客户话术、人设和目标、接单备注、P7 来访文本、`NO_HUMAN_REQUEST`、医疗固定话术、Oracle 与反例对客户说的话、合成姓名、用户模拟器提示词（结束信号不变）；中文识别规则全部改写并重新验证：转人工请求（`_ASK_HUMAN`）、医疗建议（`_ADVICE`）、完成声明（各模板 `_CLAIMS`/`_DONE` 等、`false_claim`）、固定话术关键词、退款授权请求。备注里的标记（如 `handed-to-human`）一并改成英文。否定词加了词边界 | 论文需要 | `template_check` 20 个模板 Oracle 20/20、反例全部抓到；单元测试 395 个通过；`tests/test_prefreeze_revisions.py` 守住新规则 |
 
 英文化时顺带修的识别规则：T3 的拦截声明在「确认拦截后才能退款」这种条件句里不再算声明（`_HEDGE` 加了 after/only/before）；退款授权请求只认整句的「请确认/同意办理退款（金额）」，不认「请确认退款是否到账」这类。
+
+
+## Case Ledger（论文第 6 节方法，11/25 起）
+
+代码：`case_lifecycle_bench/case_ledger/`（`book.py` 账本与包装层、`checks.py` 检查 A/B/C、`statement.py` 账单、`scorekeeper.py`、`prompts.py`、`config.py`、`tools.py`）；`model_agent.py` 加了 `ledger_tools` 参数和 ref 编号；`template_run.py` 加了 `--group {E0,E2,E3,A1,A2}`，并拒绝在测试种子上跑账本组（除非设 `LEDGER_FROZEN`）。旧的 `ledger.py` 没动。预登记草稿在 `PREREGISTRATION.md`（12/6 冻结时才生效）。
+
+**变更日志（对所有组生效，12/6 冻结前合入）：** 工具结果前加 `[ref W3.7]` 前缀（W 后是本案第几次醒来，点后是本次醒来里第几次调用，`say` 和 `user_reply` 也占号）。没有账本的组由 `model_agent` 自己按同样规则编号，所以所有组格式一致。这是看到账本结果之前做的改动。
+
+### 验收 7 条
+
+| # | 项目 | 状态 |
+| --- | --- | --- |
+| 1 | 单元测试：检查 A、B、C（含关单门槛）、账单、记分员 JSON 解析、ref 编号，各自覆盖通过和退回；原有测试照样通过 | 完成：`tests/test_case_ledger.py` 29 个，全套 424 个通过（原 395 个 + 账本 29 个） |
+| 2 | 工具分类报告 | 已生成 `docs/LEDGER_TOOL_CLASSIFICATION.md`（`scripts/ledger_tool_report.py`），待负责人看；疑问见下 |
+| 3 | Oracle 不被误拦 | 完成：`scripts/ledger_offline_check.py`，20 个模板 × 种子 300–309、390、391 × 两种唤醒 = 480 次 Oracle 运行，其中 44 次写操作超时，检查 A 触发 0 次 |
+| 4 | 反例被拦 | 完成：refund-timeout-committed 的 `blind_retry` 触发检查 A 共 24 次。另有 field-service-reschedule 的 3 个反例在 P7 种子上崩溃（`KeyError: 'slots'`），不用账本也一样，与账本无关 |
+| 5 | 真实模型冒烟（E2、E3、A1、A2，开发种子，每模板至少 3 题、两种唤醒） | 脚本就绪（`template_run --group ... --start-seed 400`）；只跑了 E3 一个模板的 2 题试通，全量待排期（见下） |
+| 6 | 记分员抽查 30 条 | 脚本就绪：`scripts/scorekeeper_audit.py`，待有开发种子结果后抽样、人工判断 |
+| 7 | 成本报告 | 脚本就绪：`scripts/ledger_cost_report.py`（E1 的历史 token 由 E0 轨迹估算），待有开发种子结果 |
+
+### 87 个检查的核对（`scripts/check_classes.py`，只看检查定义）
+
+草稿分类全部落进七类各一次，没有重复、没有遗漏。**代码里还有 10 个检查不在 87 个里**，都来自 cancel-partial-success（T3，旧的分阶段评价）：`closed_after_refund_notification`、`customer_informed_of_failure`、`customer_informed_of_pending_status`、`escalated_after_failure`、`no_unneeded_escalation`、`notified_after_interception`、`single_handoff`、`ticket_kept_open`、`unexpired_followup_at_deadline`，另有 `commitments_kept`（T3 和三个零售模板）。我的建议：`commitments_kept`、`unexpired_followup_at_deadline` 归遗漏；`customer_informed_of_failure`、`customer_informed_of_pending_status`、`notified_after_interception` 归遗漏·告知；`closed_after_refund_notification`、`ticket_kept_open` 归假完成；`single_handoff` 归重复；`escalated_after_failure`、`no_unneeded_escalation` 归时机（双向）。**这些都请你拍板。**
+
+拿不准的（草稿里已有的）：
+1. `closure_matches_state`：关得太早是假完成，该关不关是遗漏，两个方向都有。
+2. `customer_notified_after_verification`：草稿放假完成，但它是“告知”类。
+3. 升级类检查分在两处：`escalation_matches_deadline/overdue/silence/expiry` 在时机，`escalation_matches_limit/second_miss/broken_promises/confirmation/state` 在业务判断，但 `_limit`（5 天上限）和 `_broken_promises` 同样是按时间/次数触发的，建议统一。
+4. `reminded_once_per_broken_promise`：既防重复提醒，也要求提醒过，草稿放重复。
+5. `retry_matches_failure`：重试与失败状态是否对应，草稿放业务判断，但“超时后重做”那一半属于重复。
+6. `compliant_contact`、`compliant_reminders_and_contact`：草稿放过早（太早、超频），也含联系窗口规则。
+
+### 要负责人确认的设计问题
+
+* **`told_ref` 看不见：** 客户在聊天里时，Agent 直接说的话没有工具结果，模型看不到那条话的 ref，只能用 `send_message_to_user`/`say_to_customer` 的结果 ref。chat 里的承诺怎么叫醒要么都改成发消息，要么允许“本次醒来里发过任何一条给客户的消息”。我按任务书原样实现。
+* **工具分类：** 默认规则下 `offer_*`、`inform_*`、`present_*`、`record_*`（共约 20 个）是“写”，但 `offer_*`、`inform_*`、`present_*` 实际是对客户说话或读取，`record_*` 是写客户的话。它们对检查 A 基本无影响（只有超时过的对象才会拦），对检查 B 只影响“读”的认定。要不要加到 `KIND_OVERRIDES` 数据表请定。
+* **对象 id：** 很多写工具（`book_appointment`、`pay…` 以外的服务类）只带 `contact_id` 或没有 id，匹配靠 `subject_id/order_id/refund_id/claim_id/application_id/ticket_id`。读操作命中“某个对象”用的是调用里出现的任一个 id（不只是第一个），以免 `get_refund(refund_id)` 配不上以订单号为对象的承诺。
+* **没有 `end_session` 的结束：** 聊天来访里模型直接收尾（客户发结束信号）时没有 `end_session`，此时只记分员补记和计入 `unbalanced_at_end`，没法退回（日志里的 `implicit_ends`）。
+* **token 数是估算**（字符数 / 4），网关不返回 usage。
