@@ -108,9 +108,15 @@ def unbalanced(promises, followups, refs, push):
             continue
         wake_by = promise["wake_by"]
         if wake_by == "customer":
-            entry = refs.get(normalize_ref(promise.get("told_ref")))
-            if entry is None or entry["kind"] != "message":
-                problems.append(f"{promise_line(promise)} (told_ref is missing or not a message sent to the customer)")
+            told = promise.get("told_ref")
+            if told:
+                entry = refs.get(normalize_ref(told))
+                if entry is None or not entry.get("direct"):
+                    problems.append(f"{promise_line(promise)} (told_ref is not a call in which you spoke with the customer)")
+            elif not any(
+                entry.get("direct") and entry["wake"] >= promise.get("created_wake", 0) for entry in refs.values()
+            ):
+                problems.append(f"{promise_line(promise)} (you have not spoken with the customer since you made this promise)")
         elif wake_by == "event":
             if not push:
                 problems.append(f"{promise_line(promise)} (no system notification arrives in this mode; schedule a follow-up)")

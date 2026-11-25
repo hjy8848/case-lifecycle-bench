@@ -11,7 +11,7 @@ def estimate_tokens(text: str) -> int:
 def _wake_note(promise, followups, push) -> str:
     wake_by = promise["wake_by"]
     if wake_by == "customer":
-        return f"customer contact (told at {promise.get('told_ref') or 'no ref'})"
+        return "customer contact" + (f" (spoke at {promise['told_ref']})" if promise.get("told_ref") else "")
     if wake_by == "event":
         return "system notification" + ("" if push else " (not delivered in this mode)")
     due = parse_time(promise.get("due_by"))

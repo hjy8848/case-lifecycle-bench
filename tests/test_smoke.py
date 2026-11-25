@@ -51,6 +51,7 @@ class SmokeTest(unittest.TestCase):
                         {"content": "Confirm the cancellation."},
                         {"content": "I will handle it."},
                         {"content": "LEFT"},
+                        {"content": "Nothing more to do."},  # the after-contact turn
                     ]
                 )
 
@@ -65,7 +66,7 @@ class SmokeTest(unittest.TestCase):
         agent = model_agent(gateway, "agent", "customer", case)
         run = run_case(case, agent)
         self.assertEqual(
-            [row[0] for row in gateway.messages], ["agent", "customer"] * 2
+            [row[0] for row in gateway.messages], ["agent", "customer"] * 2 + ["agent"]  # the last is the after-contact turn
         )
         agent_messages = gateway.messages[0][1]
         self.assertNotIn(case["visits"][0]["goal"], str(agent_messages))

@@ -97,6 +97,8 @@ class PromiseBook:
             "ref": ref, "wake": self.wake, "seq": self._seq, "n": state["n"], "tool": tool, "kind": kind,
             "args": deepcopy(args), "subject": subject_of(args), "touches": touches(args),
             "result": deepcopy(result), "error": error,
+            # Spoke with the customer: a message tool, or any call that carries a contact id.
+            "direct": kind == "message" or (kind != "blocked" and "contact_id" in args),
         }
         self.refs[ref] = entry
         if kind in {"read", "write", "handoff", "message"}:
@@ -119,15 +121,16 @@ class PromiseBook:
                 payload = {"error": "ledger_open_promises", "open": open_}
                 blocked = self._reject("close_gate", ref, payload)
                 if blocked is not None:
-                    self._entry(ref, tool, kind, args, blocked, state)
+                    self._entry(ref, tool, "blocked", args, blocked, state)
                     wake_calls.append({"n": state["n"], "tool": tool, "kind": kind, "args": args, "result": blocked})
                     return blocked
         if kind in {"write", "handoff"} and self.config.check_a:
-            blocked = check_result = checks.check_a(self.pending, self.journal, self.wake, touches(args))
-            if check_result is not None:
-                blocked = self._reject("A", ref, check_result)
+            refusal = checks.check_a(self.pending, self.journal, self.wake, touches(args))
+            if refusal is not None:
+                blocked = self._reject("A", ref, refusal)
                 if blocked is not None:
-                    self._entry(ref, tool, kind, args, blocked, state)
+                    # A refused call never reached the environment: it is not a write and not a journal entry.
+                    self._entry(ref, tool, "blocked", args, blocked, state)
                     return blocked
         result = call(tool, **args)
         entry = self._entry(ref, tool, kind, args, result, state)
@@ -173,7 +176,7 @@ class PromiseBook:
             "id": pid, "to": args["to"], "what": args["what"], "done_when": args["done_when"],
             "due_by": args.get("due_by"), "condition": args.get("condition"), "subject": args.get("subject"),
             "wake_by": wake_by, "told_ref": args.get("told_ref"), "status": "open", "source": source,
-            "created_ref": ref,
+            "created_ref": ref, "created_wake": self.wake,
         }
         return pid
 

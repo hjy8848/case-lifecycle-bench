@@ -52,7 +52,7 @@ def main():
                     counter_rows[label]["A"] += counts["A"]
     print(json.dumps({"oracle_runs": oracle_runs, "oracle_timeouts": oracle_timeouts, "oracle_check_A_triggers": oracle_a}))
     for (name, agent), counts in sorted(counter_rows.items()):
-        if counts["A"] or counts["crashed"]:
+        if counts["A"] or counts["crashed"] or "--all" in sys.argv:
             print(f"counterexample {agent} in {name}: check A would refuse {counts['A']} writes; crashed on {counts['crashed']} runs")
     print("total counterexample check-A refusals:", sum(c["A"] for c in counter_rows.values()))
 

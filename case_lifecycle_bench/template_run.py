@@ -26,7 +26,7 @@ from .model_agent import ChatGateway, _customer_reply, model_agent
 from .outcomes import summarize_by_variant
 
 
-GROUPS = ("E0", "E2", "E3", "A1", "A2")  # E1 (full history) and E4 (single session) have their own runners
+GROUPS = ("E0", "E1", "E2", "E3", "A1", "A2")  # E4 (single session) has its own runner
 TEST_SEEDS = {*range(300, 310), 390, 391}
 
 
@@ -52,7 +52,7 @@ def run_one(
         "template": name,
         "seed": seed,
         "wake": wake,
-        "memory": "stateless_crm" if group == "E0" else f"case_ledger_{group}",
+        "memory": {"E0": "stateless_crm", "E1": "full_history"}.get(group, f"case_ledger_{group}"),
         "agent_model": model,
         "user_model": user_model,
         "temperature": 0,
@@ -75,8 +75,21 @@ def run_one(
         return record
     gateway = ChatGateway(base, os.environ.get("CASE_LIFECYCLE_API_KEY"), enable_thinking=enable_thinking)
     book = None
+    history_tokens = []
     if group == "E0":
         agent = model_agent(gateway, model, user_model, case, policy=workflow.policy, tools=workflow.tools)
+    elif group == "E1":
+        from .case_ledger.statement import estimate_tokens
+        from .history import FullHistory
+
+        inner = model_agent(gateway, model, user_model, case, policy=workflow.policy, tools=workflow.tools)
+
+        def measured(session, call):
+            # What the diary adds to the context on this wake, in the same estimate the bill uses.
+            history_tokens.append(estimate_tokens(json.dumps(session.get("full_history", []), ensure_ascii=False)))
+            return inner(session, call)
+
+        agent = FullHistory().wrap(measured)
     else:
         from .case_ledger import PromiseBook
 
@@ -100,7 +113,7 @@ def run_one(
 
     run = run_case(case, agent, wake=wake, customer=customer)
     evaluation = evaluate_case(case, run)
-    counter = inner if book is not None else agent
+    counter = inner if (book is not None or group == "E1") else agent
     meta.update(
         model_calls=gateway.calls,
         model_retries=gateway.retries,
@@ -117,6 +130,8 @@ def run_one(
     }
     if book is not None:
         record["ledger"] = book.log()
+    per_wake = book.statement_tokens if book is not None else history_tokens
+    record["memory_tokens"] = {"per_wake": per_wake, "mean": (sum(per_wake) / len(per_wake)) if per_wake else 0}
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(record, ensure_ascii=False, indent=1), encoding="utf-8")
     tmp.replace(path)

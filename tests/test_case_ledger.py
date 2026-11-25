@@ -354,5 +354,132 @@ class TestSeedGuardTest(unittest.TestCase):
             run_one("credit-delinquency", 391, "poll", "m", "m", "http://127.0.0.1:1/v1", Path("."), enable_thinking=None, group="A1")
 
 
+class GenericObjectIdsTest(unittest.TestCase):
+    def test_every_id_but_people_calls_and_tasks_names_an_object(self):
+        self.assertEqual(subject_of({"loan_id": "L1", "user_id": "U1"}), "L1")
+        self.assertEqual(touches({"loan_id": "L1", "contact_id": "C1", "task_id": "F1", "customer_id": "X"}), {"L1"})
+        self.assertEqual(subject_of({"zeta_id": "Z", "alpha_id": "A"}), "A")  # no usual key: alphabetical
+        self.assertEqual(subject_of({"zeta_id": "Z", "order_id": "O1"}), "O1")  # the usual keys come first
+
+    def test_a_timeout_on_a_tool_that_only_has_a_loan_id_is_now_caught(self):
+        book, env = PromiseBook(LedgerConfig.full()), Env(timeouts={"submit_disbursement"})
+
+        def agent(call):
+            call("submit_disbursement", loan_id="L1")
+            self.assertEqual(call("submit_disbursement", loan_id="L1")["error"], "reconcile_first")
+
+        wake(book, env, agent)
+
+
+class OptionalToldRefTest(unittest.TestCase):
+    def test_waiting_for_the_customer_balances_once_you_have_spoken_to_them(self):
+        book, env = PromiseBook(LedgerConfig.full()), Env()
+        seen = []
+
+        def agent(call):
+            call("add_promise", to="customer", what="waiting", done_when="reply", wake_by="customer")
+            seen.append(call("end_session").get("error"))
+            call("say_to_customer", contact_id="C1", text="We will wait for your reply.")
+            seen.append(call("end_session").get("error"))
+
+        wake(book, env, agent)
+        self.assertEqual(seen, ["ledger_unbalanced", None])
+
+    def test_a_given_told_ref_must_point_to_a_call_with_the_customer(self):
+        book, env = PromiseBook(LedgerConfig.full()), Env()
+        seen = []
+
+        def agent(call):
+            call("read_claim", claim_id="C1")  # W1.1, not a conversation
+            call("add_promise", to="customer", what="w", done_when="d", wake_by="customer", told_ref="W1.1")
+            call("say_to_customer", contact_id="C1", text="Hello")
+            seen.append(call("end_session").get("error"))
+
+        wake(book, env, agent)
+        self.assertEqual(seen, ["ledger_unbalanced"])
+
+
+class BlockedCallTest(unittest.TestCase):
+    def test_a_refused_write_is_not_the_last_write_and_not_in_the_journal(self):
+        book, env = PromiseBook(LedgerConfig.full()), Env(timeouts={"pay_claim"})
+        seen = {}
+
+        def agent(call):
+            call("add_promise", to="customer", what="w", done_when="d", subject="C1")
+            call("pay_claim", claim_id="C1")  # W1.2 times out
+            call("read_claim", claim_id="C1")  # W1.3
+            blocked = call("pay_claim", claim_id="C2")  # a different object: goes through
+            self.assertEqual(blocked, {"ok": True})
+            call("pay_claim", claim_id="C1")  # W1.5 reconciled by the read, goes through
+            seen["settle"] = call("settle_promise", promise_id="P1", how="done", evidence="W1.3")
+
+        wake(book, env, agent)
+        self.assertEqual(seen["settle"]["error"], "evidence_not_fresh")  # C1 was written again after that read
+
+    def test_a_call_refused_by_check_a_is_kind_blocked(self):
+        book, env = PromiseBook(LedgerConfig.full()), Env(timeouts={"pay_claim"})
+
+        def agent(call):
+            call("pay_claim", claim_id="C1")
+            call("pay_claim", claim_id="C1")  # W1.2 refused
+            call("read_claim", claim_id="C1")  # W1.3
+
+        wake(book, env, agent)
+        self.assertEqual(book.refs["W1.2"]["kind"], "blocked")
+        self.assertNotIn("W1.2", [e["ref"] for e in book.journal])
+        self.assertTrue(any(e["ref"] == "W1.3" for e in book.journal))
+
+    def test_a_refused_write_does_not_make_an_earlier_read_stale(self):
+        book, env = PromiseBook(LedgerConfig.full()), Env(timeouts={"pay_claim"})
+        seen = {}
+
+        def agent(call):
+            call("pay_claim", claim_id="C1")  # W1.1 times out
+            call("read_claim", claim_id="C1")  # W1.2 reconciles
+            call("add_promise", to="customer", what="w", done_when="d", subject="C1")
+            call("close_ticket", ticket_id="T1", resolution_code="x")  # W1.4 refused by the close gate (touches T1)
+            seen["settle"] = call("settle_promise", promise_id="P1", how="done", evidence="W1.2")
+
+        wake(book, env, agent)
+        self.assertEqual(seen["settle"], {"ok": True})
+
+
+class AfterContactTest(unittest.TestCase):
+    def test_after_the_customer_leaves_the_agent_may_only_use_tools_and_what_it_says_is_dropped(self):
+        class Gateway:
+            def __init__(self):
+                self.script = iter(
+                    [
+                        {"content": "Hello, how can I help?"},  # said to the customer
+                        {"content": "LEFT"},  # the simulated customer
+                        {"content": "I will note this down.", "tool_calls": [{"id": "1", "function": {"name": "add_ticket_note", "arguments": json.dumps({"ticket_id": "T1", "text": "x"})}}]},
+                        {"tool_calls": [{"id": "2", "function": {"name": "end_session", "arguments": "{}"}}]},
+                    ]
+                )
+                self.seen = []
+
+            def reply(self, model, messages, tools=None):
+                self.seen.append(list(messages))
+                return next(self.script)
+
+        from case_lifecycle_bench.model_agent import AFTER_CONTACT_MESSAGE
+
+        gateway, env = Gateway(), Env()
+        spoken = []
+        base = Env()
+
+        def call(tool, **args):
+            if tool == "say":
+                spoken.append(args["text"])
+            return base(tool, **args)
+
+        agent = model_agent(gateway, "m", "u", {"visits": [{"id": "V1"}]})
+        outcome = agent({"t": "2026-01-05T10:00:00", "trigger_type": "user_visit", "trigger_id": "V1", "message": "Hi"}, call)
+        self.assertEqual(outcome, "LEFT")
+        self.assertEqual(spoken, ["Hello, how can I help?"])  # the after-contact text was not said
+        self.assertTrue(any(m["content"] == AFTER_CONTACT_MESSAGE for m in gateway.seen[-1] if m["role"] == "user"))
+        self.assertIn("add_ticket_note", [t for t, _ in base.calls])
+
+
 if __name__ == "__main__":
     unittest.main()

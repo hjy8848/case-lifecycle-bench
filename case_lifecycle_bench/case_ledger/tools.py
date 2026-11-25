@@ -13,6 +13,8 @@ CONTROL_TOOLS = {"end_session"}
 LEDGER_TOOLS = {"add_promise", "settle_promise"}
 _HANDOFF = re.compile(r"^escalate_|handoff|refer|transfer")
 SUBJECT_KEYS = ("subject_id", "order_id", "refund_id", "claim_id", "application_id", "ticket_id")
+# Ids of people, calls and follow-up tasks are not objects a write can leave in an unknown state.
+NOT_OBJECTS = {"user_id", "customer_id", "contact_id", "task_id"}
 
 # Data-table exceptions, tool name -> kind. Empty unless the lead adds a row after the review.
 KIND_OVERRIDES: dict[str, str] = {}
@@ -37,17 +39,25 @@ def tool_kind(name: str) -> str:
     return "write"
 
 
+def _object_keys(args: dict) -> list:
+    """Every *_id argument that names an object, the six usual keys first (in order), the rest by name."""
+    named = [key for key in SUBJECT_KEYS if args.get(key) not in (None, "")]
+    rest = sorted(
+        key for key in args if key.endswith("_id") and key not in SUBJECT_KEYS and key not in NOT_OBJECTS
+        and args.get(key) not in (None, "")
+    )
+    return named + rest
+
+
 def subject_of(args: dict):
-    """The object id a call is about: the first of SUBJECT_KEYS that is present."""
-    for key in SUBJECT_KEYS:
-        if args.get(key) not in (None, ""):
-            return str(args[key])
-    return None
+    """The object id a call is about: the first usual key present, else the first other *_id by name."""
+    keys = _object_keys(args)
+    return str(args[keys[0]]) if keys else None
 
 
 def touches(args: dict) -> set:
     """Every object id a call mentions. A read of any of them counts as a read of that object."""
-    return {str(args[key]) for key in SUBJECT_KEYS if args.get(key) not in (None, "")}
+    return {str(args[key]) for key in _object_keys(args)}
 
 
 def ledger_tool_schemas() -> list[dict]:
@@ -66,8 +76,9 @@ def ledger_tool_schemas() -> list[dict]:
                 "name": "add_promise",
                 "description": (
                     "Record something you now owe. wake_by says what will bring you back to it: a follow-up "
-                    "you schedule (followup), the customer contacting you (customer; give told_ref, the ref "
-                    "of the message where you told them), or a system notification (event)."
+                    "you schedule (followup), the customer contacting you (customer; you must have spoken with "
+                    "them in this or a later session; told_ref optionally names that call), or a system "
+                    "notification (event)."
                 ),
                 "parameters": {
                     "type": "object",
@@ -79,7 +90,7 @@ def ledger_tool_schemas() -> list[dict]:
                         "condition": prop("string", "A condition that must hold before you act, if any."),
                         "subject": prop("string", "The object id this is about, if any."),
                         "wake_by": prop("string", "followup, customer or event.", ["followup", "customer", "event"]),
-                        "told_ref": prop("string", "Ref of the message in which you told the customer."),
+                        "told_ref": prop("string", "Optional: ref of the call in which you spoke to the customer."),
                     },
                     "required": ["to", "what", "done_when"],
                 },

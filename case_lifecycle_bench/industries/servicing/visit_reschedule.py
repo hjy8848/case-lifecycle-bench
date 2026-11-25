@@ -225,10 +225,10 @@ class RescheduleEnvironment(ChatContactMixin, ServicingEnvironment):
         record = self._record()
         script = self.contact_scripts[contact["contact_id"]]
         if tool == "offer_available_slots":
-            result = {"slots": script["slots"]}
+            result = {"slots": script.get("slots", [])}
             if not self.hide_customer_intent:
                 result["customer_choice"] = script.get("chosen_slot")
-            return result, {"contacts": {contact["contact_id"]: {**contact, "offered_slots": script["slots"]}}}
+            return result, {"contacts": {contact["contact_id"]: {**contact, "offered_slots": script.get("slots", [])}}}
         if tool == "record_fee_consent":
             if script.get("fee_ok") is not True:
                 return {"error": "fee_not_agreed"}, {}
@@ -320,7 +320,7 @@ def _run(session, call, *, choose_for_customer=False, skip_fee=False, cancel_ori
         return "CONFIRMED"
     offered = call("offer_available_slots", contact_id=contact_id)
     chosen = offered.get("customer_choice")
-    if choose_for_customer:
+    if choose_for_customer and offered["slots"]:
         chosen = next((s for s in offered["slots"] if s != chosen), offered["slots"][0])
     short_notice = _slot_start(view["appointment"]["slot"]) - datetime.fromisoformat(session["t"]) < timedelta(hours=24)
     if short_notice and not skip_fee and chosen:

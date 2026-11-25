@@ -33,6 +33,7 @@ class CustomerSimulatorTest(unittest.TestCase):
                 },
                 {"content": "Refund request submitted, waiting for the payment gateway."},
                 {"content": "CONFIRMED"},
+                {"content": "Nothing more to do."},  # the after-contact turn
             ]
         )
         run = run_case(case, model_agent(gateway, "agent", "customer", case))

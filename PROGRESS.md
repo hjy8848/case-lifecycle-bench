@@ -646,3 +646,18 @@ L2 第一次的“之前”是那轮当时的结果（当时的规则更早）�
 * **对象 id：** 很多写工具（`book_appointment`、`pay…` 以外的服务类）只带 `contact_id` 或没有 id，匹配靠 `subject_id/order_id/refund_id/claim_id/application_id/ticket_id`。读操作命中“某个对象”用的是调用里出现的任一个 id（不只是第一个），以免 `get_refund(refund_id)` 配不上以订单号为对象的承诺。
 * **没有 `end_session` 的结束：** 聊天来访里模型直接收尾（客户发结束信号）时没有 `end_session`，此时只记分员补记和计入 `unbalanced_at_end`，没法退回（日志里的 `implicit_ends`）。
 * **token 数是估算**（字符数 / 4），网关不返回 usage。
+
+
+### 负责人审阅后的修改（11/25，冒烟之前）
+
+| 序号 | 修改 | 类型 |
+| --- | --- | --- |
+| 1 | 对象 id 通用化：调用里所有以 `_id` 结尾的参数都算对象，只排除 `user_id`、`customer_id`、`contact_id`、`task_id`；`subject_of` 先按原来 6 个字段的顺序取，取不到按字母序取其余 `*_id` | 账本代码 |
+| 2 | **挂机后处理（所有组）**：客户模拟器返回结束信号后，先追加一条消息 `The customer has left the conversation. Finish any after-contact work with tools (do not message the customer), then call end_session.`，之后最多 8 轮只能调工具（文字丢弃、不发给客户），最后仍返回原来的结束信号。账本组在这一步跑记分员和检查 C；E0、E1、E2 同样有这一步，只是没有检查 | **对所有组生效的格式改动，和 ref 前缀一样，12/6 冻结前合入；看账本结果之前做的** |
+| 3 | `told_ref` 改为可选：`wake_by=customer` 的承诺，只要从创建它的那次醒来起 Agent 和客户直接交流过（`say`、`send_message_to_user`、`say_to_customer`，或任何带 `contact_id` 的调用）就算平；给了 `told_ref` 的必须指向这类调用。工具描述同步 | 账本代码 |
+| 4 | 被检查 A 或关单门槛拦下的调用在 refs 里记成 `kind="blocked"`，不进流水，也不算“最后一次写” | 账本代码 |
+| 5 | field-service-reschedule 在 P7 种子上 `KeyError: 'slots'` 是 benchmark 的 bug：`offer_available_slots` 对没有 `slots` 的来访返回空列表，`choose_for_customer` 反例也不再崩；`template_check` 20 个模板重跑全部 Oracle 20/20 | benchmark 修复，冻结前 |
+| 6 | 检查分类按两条原则统一并写进 `PREREGISTRATION.md`；`scripts/check_classes.py` 现在核对 97 个检查（87 个加上 T3 旧评价里的 10 个），每个恰好一类、没有遗漏 | 预登记 |
+| 7 | 新增 E1 组（`--group E1`，`FullHistory`）并在每次醒来记录记忆 token（E1 记历史、账本组记账单），成本报告 E1 的历史 token 用 E1 自己的轨迹算 | 实验代码 |
+
+**验收 3、4 重跑（改完 1–4 之后）：** 20 个模板 × 种子 300–309、390、391 × 两种唤醒 = 480 次 Oracle，44 次写操作超时（其中 L3 的 `submit_disbursement` 12 次、I3 的 `pay_claim` 8 次，现在都能被登记到待查区，原来 L3 的拦不到），检查 A 触发 0 次。反例：T2 的 `blind_retry` 被拦 24 次。L3 的 `resend_disbursement`、`resubmit_same_account`、`false_arrival_claim` 和 I3 的 `resend_payout`、`repay_without_new_account`、`false_arrival_claim` 被检查 A 拦的次数都是 0：这些反例是先读了再重付，正是任务书说的“读了还照样重付，不归账本管”，不是漏拦。432 个测试通过。

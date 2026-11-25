@@ -46,15 +46,39 @@ Any prediction that does not hold is reported as it is, not reworded. If 2 fails
 
 Responsibility rate (primary), failure rate of each check column, wrongful-closure rate, harmful and procedural unsafe-action rates, split by terminal outcome and wake mode; memory tokens per wake (bill or history); extra calls and tokens for the scorekeeper and for rejections.
 
-## Check classes (draft, from the check definitions only)
+## Check classes
 
-The 87 checks of the task description are in `scripts/check_classes.py`, which verifies that each check is in exactly one class.
-Seven classes: omission (19), omission-told (18, reported separately), premature (11), timing in both directions (4, reported separately), duplicate (5), false completion (2 plus the wrongful-closure rate), business judgement (28, the negative control).
+The classes follow the check definitions only, never any ledger-group result. `scripts/check_classes.py` verifies
+that every check of the benchmark sits in exactly one class. Principles (fixed by the lead on 11/25):
 
-Checks present in the code but absent from the 87 (all in `cancel-partial-success`, the older stage-based T3 evaluation, plus `commitments_kept` in four retail templates) and a few classification doubts are listed in `PROGRESS.md` under "Case Ledger" for the lead to decide before the freeze. Their class will be written here.
+* Triggered by "the time has come" is **timing**; triggered by a state or a count is **business judgement**;
+  contact rules (window, frequency, authorisation) are business judgement.
+* A check that can be wrong in both directions (too early or too late; must do but must not overdo) goes to the
+  **two-way** class. It is reported on its own and is not part of the separation test of prediction 3.
+* False completion is measured mainly by the wrongful-closure rate.
+
+| Class | Checks | Role |
+| --- | --- | --- |
+| Omission | 21 | A1 should hurt here |
+| Omission, told | 21 | reported separately (expected effect small) |
+| Premature | 9 | A2 should hurt here |
+| Two-way | 8 | reported separately, outside prediction 3 |
+| Duplicate | 5 | sits where the columns cross, reported on its own |
+| False completion | 2 (plus the wrongful-closure rate) | A2 should hurt here |
+| Business judgement | 31 | the negative control (prediction 5) |
+
+The 10 checks of the older stage-based T3 evaluation that were not in the first list of 87 are classified as the lead
+decided: `commitments_kept`, `unexpired_followup_at_deadline` omission; `customer_informed_of_failure`,
+`customer_informed_of_pending_status`, `notified_after_interception` omission-told; `closed_after_refund_notification`,
+`ticket_kept_open` false completion; `single_handoff` duplicate; `escalated_after_failure`, `no_unneeded_escalation`
+business judgement (triggered by a state). `no_procedural_violation` and `handed_over_at_most_once` (added by the
+pre-freeze revisions) and the P7 check `human_request_honoured` are reported on their own.
+
+Prediction 3 uses omission versus premature plus false completion only.
 
 ## Change log
 
 | Date | Change | After seeing ledger results? |
 | --- | --- | --- |
 | 11/25 | Draft written | no |
+| 11/25 | Object ids generalised to every `_id` argument except user, customer, contact and task ids; after-contact work added for every group; `told_ref` optional; blocked calls are not writes; check classes revised by the lead | no |

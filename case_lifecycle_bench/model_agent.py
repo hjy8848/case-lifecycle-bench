@@ -268,6 +268,13 @@ def _customer_reply(gateway, model, visit, dialogue):
     return reply
 
 
+AFTER_CONTACT_MESSAGE = (
+    "The customer has left the conversation. Finish any after-contact work with tools "
+    "(do not message the customer), then call end_session."
+)
+AFTER_CONTACT_TURNS = 8
+
+
 def _numbered(call, wake):
     """Label each tool call of one wake W<wake>.<n>, the same way the ledger wrapper does, so every
     group sees one format. The label of the latest call is left on `last_ref`."""
@@ -334,6 +341,52 @@ def model_agent(
                 return outcome
             return None
 
+        def after_contact_work():
+            """Every group gets the same chance to finish up once the customer has gone: tools only,
+            no words to the customer, at most AFTER_CONTACT_TURNS turns."""
+            messages.append({"role": "user", "content": AFTER_CONTACT_MESSAGE})
+            for _ in range(AFTER_CONTACT_TURNS):
+                response = gateway.reply(model, messages, tools)
+                pending = response.get("tool_calls") or []
+                assistant = {"role": "assistant", "content": response.get("content") or None}
+                if pending:
+                    assistant["tool_calls"] = pending
+                messages.append(assistant)  # any text is dropped: it is not said to the customer
+                if not pending:
+                    if stop_gate() is not None:
+                        continue
+                    return
+                finished = False
+                for tool_call in pending:
+                    function = tool_call["function"]
+                    name = function["name"]
+                    try:
+                        args = json.loads(function["arguments"])
+                        if name not in tool_names or not isinstance(args, dict):
+                            raise ValueError
+                        if name == "end_session" and not ledger_on:
+                            result = {"ok": True}
+                        else:
+                            result = call(name, **args)
+                        if name == "end_session" and not (isinstance(result, dict) and result.get("error")):
+                            finished = True
+                    except (KeyError, TypeError, ValueError) as error:
+                        agent.invalid_arguments += 1
+                        agent.invalid_log.append(
+                            {"tool": name, "arguments": function.get("arguments"), "error": repr(error)[:200]}
+                        )
+                        result = {"error": "invalid_arguments"}
+                    ref = getattr(call, "last_ref", None) if result != {"error": "invalid_arguments"} else None
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_call["id"],
+                            "content": (f"[ref {ref}] " if ref else "") + json.dumps(result, ensure_ascii=False),
+                        }
+                    )
+                if finished:
+                    return
+
         if "message" in session:
             messages.append({"role": "user", "content": session["message"]})
             dialogue.append({"customer": session["message"]})
@@ -387,6 +440,7 @@ def model_agent(
                 return None
             reply = _customer_reply(user_gateway, user_model, visit, dialogue)
             if reply.upper() in SIGNALS:
+                after_contact_work()
                 return reply.upper()
             if not reply:
                 return None
