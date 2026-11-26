@@ -44,8 +44,10 @@ class PromiseBook:
 
     # -- rejections ---------------------------------------------------------------------
 
-    def _reject(self, check, ref, payload):
+    def _reject(self, check, ref, payload, call=None):
         row = {"check": check, "ref": ref, "wake": self.wake_label, "response": payload}
+        if call is not None:
+            row["call"] = call  # the tool and arguments that were refused, for the analysis
         if self.config.record_only:
             self.would_reject.append(row)
             return None
@@ -119,7 +121,7 @@ class PromiseBook:
             open_ = checks.open_promises(self.promises)
             if open_:
                 payload = {"error": "ledger_open_promises", "open": open_}
-                blocked = self._reject("close_gate", ref, payload)
+                blocked = self._reject("close_gate", ref, payload, {"tool": tool, "args": deepcopy(args)})
                 if blocked is not None:
                     self._entry(ref, tool, "blocked", args, blocked, state)
                     wake_calls.append({"n": state["n"], "tool": tool, "kind": kind, "args": args, "result": blocked})
@@ -127,7 +129,7 @@ class PromiseBook:
         if kind in {"write", "handoff"} and self.config.check_a:
             refusal = checks.check_a(self.pending, self.journal, self.wake, touches(args))
             if refusal is not None:
-                blocked = self._reject("A", ref, refusal)
+                blocked = self._reject("A", ref, refusal, {"tool": tool, "args": deepcopy(args)})
                 if blocked is not None:
                     # A refused call never reached the environment: it is not a write and not a journal entry.
                     self._entry(ref, tool, "blocked", args, blocked, state)
@@ -193,7 +195,11 @@ class PromiseBook:
         if self.config.check_b:
             failure = checks.check_b(how, evidence, promise, self.refs, self.wake, self.customer_texts, self.policy)
             if failure is not None:
-                blocked = self._reject("B", ref, failure)
+                cited = self.refs.get(checks.normalize_ref(evidence))
+                blocked = self._reject("B", ref, failure, {
+                    "tool": "settle_promise", "args": deepcopy(args), "promise": dict(promise),
+                    "cited": None if cited is None else {"tool": cited["tool"], "kind": cited["kind"], "wake": cited["wake"]},
+                })
                 if blocked is not None:
                     return blocked
         promise["status"] = how

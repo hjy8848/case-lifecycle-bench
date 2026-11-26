@@ -447,8 +447,10 @@ def model_agent(
             call("user_reply", text=reply)
             dialogue.append({"customer": reply})
             messages.append({"role": "user", "content": reply})
+        agent.turn_limit_hits += 1  # the 30 turns ran out before the agent stopped
 
     # Malformed calls never reach the environment, so the agent counts them itself.
     agent.invalid_arguments = 0
     agent.invalid_log = []
+    agent.turn_limit_hits = 0
     return agent

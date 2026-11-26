@@ -120,6 +120,7 @@ def run_one(
         api_base=base,
         invalid_arguments=counter.invalid_arguments,
         invalid_calls=counter.invalid_log,
+        turn_limit_hits=getattr(counter, "turn_limit_hits", 0),
     )
     record = {
         "case_id": case["case_id"],
