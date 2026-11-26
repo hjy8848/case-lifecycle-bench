@@ -82,3 +82,4 @@ Prediction 3 uses omission versus premature plus false completion only.
 | --- | --- | --- |
 | 11/25 | Draft written | no |
 | 11/25 | Object ids generalised to every `_id` argument except user, customer, contact and task ids; after-contact work added for every group; `told_ref` optional; blocked calls are not writes; check classes revised by the lead | no |
+| 11/26 | Logging only: refused call arguments and the cited call in rejection rows; turn-limit hits in the result meta (7355ce7) | yes, after development-seed results |
