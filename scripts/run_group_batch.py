@@ -65,8 +65,12 @@ def main():
     args = parser.parse_args()
     base = os.environ["CASE_LIFECYCLE_API_BASE"]
     args.output.mkdir(parents=True, exist_ok=True)
-    dirty = bool(subprocess.run(["git", "status", "--porcelain"], cwd=ROOT, capture_output=True, text=True).stdout.strip())
-    commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
+    if os.environ.get("CLB_COMMIT"):
+        # A copy deployed with `git archive` has no .git: the deployer states the commit, and the copy is clean.
+        commit, dirty = os.environ["CLB_COMMIT"], False
+    else:
+        dirty = bool(subprocess.run(["git", "status", "--porcelain"], cwd=ROOT, capture_output=True, text=True).stdout.strip())
+        commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT, capture_output=True, text=True).stdout.strip()
     (args.output / "PROVENANCE.json").write_text(
         json.dumps({"commit": commit, "tree_clean": not dirty, "model": args.model, "groups": args.groups,
                     "seeds": args.seeds, "customer": "llm", "backend": "gateway", "workers": args.workers}, indent=1),
