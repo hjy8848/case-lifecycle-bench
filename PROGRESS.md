@@ -702,3 +702,103 @@ L2 第一次的“之前”是那轮当时的结果（当时的规则更早）�
 5. 验收第 3 条重跑：480 次 Oracle 运行，检查 A 触发 0 次（反例 24 次照旧）。Oracle 自己不记承诺，所以检查 C 和关单门槛对它不会触发，这一条对检查 C 只能说明"没有误拦"，不能说明检查 C 本身对。
 
 复测安排：开发种子 403–405，六个组，两种唤醒（720 个），当前 400–402 批次跑完后自动开始；之后再跑升级题 409（240 个）。400–402 不再用来调。复测里单独报告 field-service-reschedule 和 insurance-damage-revision 两个模板（在 400、401 上出过问题的那两题对应的模板）。
+
+
+### 403–405 复测结果（新版 5c8af34，11/27 凌晨跑完，720/720，没有失败任务）
+
+**责任履行（每组 120 个任务）：**
+
+| 组 | 全部 | 已解决（40） | 继续等（40） | 该升级（40） | Poll | Push | 每次醒来记忆 token |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| E0 | 52（43%） | 18 | 20 | 14 | 27/60 | 25/60 | 0 |
+| E1 | 61（51%） | 18 | 23 | 20 | 30/60 | 31/60 | 2960 |
+| E2 | 57（48%） | 18 | 22 | 17 | 27/60 | 30/60 | 72 |
+| E3 | 61（51%） | 22 | 22 | 17 | 32/60 | 29/60 | 134 |
+| A1 | 50（42%） | 21 | 16 | 13 | 25/60 | 25/60 | 71 |
+| A2 | 59（49%） | 18 | 22 | 19 | 32/60 | 27/60 | 127 |
+
+**"继续等"配对（40 题）：** E3 对 E0 赢 9 输 7（13 题都过、11 题都没过）；E1 赢 8 输 5；E2 赢 8 输 6；A1 赢 4 输 8；A2 赢 7 输 5。400–401 上 E3 赢 5 输 1 的优势，在 405 上没有重现。
+
+**按类失败次数（120 个任务）：**
+
+| 组 | 遗漏 | 遗漏·告知 | 过早 | 重复 | 假完成 | 双向 | 业务判断 | 错误结案 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| E0 | 34 | 2 | 13 | 0 | 2 | 19 | 33 | 9 |
+| E1 | 17 | 4 | 15 | 1 | 0 | 17 | 36 | 3 |
+| E2 | 36 | 2 | 11 | 1 | 0 | 16 | 36 | 3 |
+| E3 | 44 | 3 | 11 | 1 | 2 | 16 | 44 | 7 |
+| A1 | 46 | 1 | 11 | 1 | 1 | 23 | 37 | 7 |
+| A2 | 40 | 6 | 10 | 1 | 3 | 17 | 34 | 6 |
+
+E3 的遗漏类失败（44）比 E0（34）还多，主要是零售模板的 `commitments_kept`（E3 14 次，E0 9 次）。日记组 E1 的遗漏最少（17）。这和预测 3、4 的方向不一致，要如实看待。
+
+**两道问题模板（每个模板 6 个任务：3 个种子 × 2 种唤醒）：**
+* field-service-reschedule：E3 通过 2/6（E0 0/6，A2 0/6）。会话数最多 12 次，检查 C 每个任务最多退回 1 次。上一批 18 次会话、越排越近的"Zeno"循环没有再出现。
+* insurance-damage-revision：E3 3/6，E0 3/6，A2 3/6。检查 C 最多退回 3 次（404 poll），会话数 2–4 次，A2 上一批连续 5 次醒来卡在同一笔承诺上的情况没有再出现。
+
+**检查 B 的 `evidence_not_a_read`（E3 25 次）按被引用的调用分类：** 引用的是自己做的写操作 18 次（`add_ticket_note` 4、`dispatch_rework` 3、`follow_up_specialist` 2、`resubmit_disbursement` 2、`present_renewal_quote` 2、其他 5）；引用发给客户的消息 4 次（`say_to_customer` 2、`send_message_to_user` 2）；ref 不存在 1 次；其他 2 次。A1（27 次）分布相近，消息类 2 次。发消息类占比很小（E3 4/25），被引用的承诺也大多不是"告知客户"类（例：B12 承诺的是"处理改约请求"），所以按发消息放行的收益有限，请负责人定。
+另外两个大类：`evidence_not_a_handoff` 32 次里 29 次的证据是交接回执号 `H1`（交接工具的返回值），不是 ref；`evidence_not_found` 52 次（见下面抽查）。
+
+### 人工抽查：检查 C 20 条、检查 B 20 条（`scripts/ledger_refusal_audit.py`，种子 0，来自 403–405）
+
+判断标准：拦得对 / 规则拦错 / 承诺本不该存在（记分员误补）。每条附一句理由。"follow-ups scheduled so far"里包括退回之后才排的跟进，判断时按退回那一刻是否有待执行的跟进算（逐条对过轨迹）。
+
+**检查 C（20 条）：拦得对 19，规则拦错 0，承诺本不该存在 1 → 过关。**
+
+| # | 案例 | 判断 | 理由 |
+| --- | --- | --- | --- |
+| C1 | E3 field-service-repair wait 405 poll W4 | 承诺本不该存在 | 记分员补了一条"给 P1 排一个更早的跟进"，这是对记账本身的提醒，不是欠客户或团队的事；真正的欠债 P1 已在账上 |
+| C2 | A2 credit-disbursement wait 405 poll W5 | 拦得对 | 自己写的 `due_by` 是 15:00，退回时唯一待执行的跟进在 16:00；退回后补了 14:00 |
+| C3 | A2 insurance-renewal-followup resolved 404 poll W5 | 拦得对 | `due_by` 当天 18:00，待执行的只有次日 09:00 的跟进；退回后补了 17:00 |
+| C4 | E3 refund-timeout-committed escalate 403 push W6 | 拦得对 | 已过期 4 天，本次触发的跟进刚执行完，账上没有任何待执行跟进 |
+| C5 | E3 field-service-reschedule resolved 404 push W2 | 拦得对 | 唯一的跟进 F1 正是本次触发的，退回时没有待执行跟进 |
+| C6 | E3 medical-intake-documents escalate 403 poll W6 | 拦得对 | 本次跟进执行后没有下一次，退回后才补了次日 10:00 |
+| C7 | E3 insurance-damage-revision resolved 404 poll W3 | 拦得对 | 模型把 `due_by` 写成复核结束时间 14:00，待执行的跟进在 14:05、14:30；按模型自己写的时间算确实不平（但把复核结束时间写进 `due_by` 而不是 `condition`，说明描述在这里没落地） |
+| C8 | A2 field-service-reschedule resolved 404 push W4 | 拦得对 | 本次跟进 F2 执行后没有待执行跟进 |
+| C9 | A2 field-service-noshow escalate 403 push W2 | 拦得对 | `due_by` 16:00，待执行的跟进在 16:30；退回后补了 15:30 |
+| C10 | E3 field-service-reschedule wait 405 push W2 | 拦得对 | 同 C5 |
+| C11 | E3 refund-timeout-committed escalate 403 push W6 | 拦得对 | 与 C4 同一次醒来的第二次退回，情况相同 |
+| C12 | E3 credit-application wait 405 poll W5 | 拦得对 | 本次跟进执行后没有下一次，退回后补了 01-11 10:00 |
+| C13 | E3 field-service-repair wait 405 poll W3 | 拦得对 | `due_by` 01-10，待执行的跟进在 01-11；退回后补了 01-09 |
+| C14 | A2 insurance-claim-payout resolved 404 poll W5 | 拦得对 | `due_by` 当天 10:00，待执行的跟进在次日 09:00；退回后补了 09:30 |
+| C15 | E3 credit-quote-change wait 405 poll W2 | 拦得对 | 同 C7：`due_by` 写成复核结束时间，跟进在 14:30 |
+| C16 | E3 field-service-noshow wait 405 push W3 | 拦得对 | `due_by` 16:00，待执行跟进 16:30；退回后补了 15:45 |
+| C17 | E3 credit-delinquency wait 405 push W5 | 拦得对 | 本次跟进 F2 刚执行，退回时没有待执行跟进（F3、F4 是两次退回之后才排的）；P3 是记分员补的"周一查是否入账"，与 P2 重叠但内容属实 |
+| C18 | E3 credit-quote-change escalate 403 poll W4 | 拦得对 | 已过期，本次跟进 F2 执行后没有下一次 |
+| C19 | E3 field-service-noshow resolved 404 push W3 | 拦得对 | 原来 17:00 的跟进 F1 被模型自己取消了，剩下的在次日 12:00 |
+| C20 | E3 field-service-noshow wait 405 push W2 | 拦得对 | `due_by` 16:00，待执行跟进 16:30；退回后补了 15:45 |
+
+观察：检查 C 的退回现在都是"按模型自己写的 `due_by` 确实没人叫醒"。但 field-service-noshow 和"复核结束"这两类题，模型仍然把对方的时间（上门时段结束、复核结束）写进 `due_by`，然后排一个稍晚的检查，于是被退回一次再补一个更早的跟进。描述改了以后这种情况变少了，但没有消失。
+
+**检查 B（20 条）：拦得对 9，ref 格式错（证据实质存在）6，规则拦错 5 → 不过关（规则拦错 5 > 2）。**
+
+| # | 案例 | 判断 | 理由 |
+| --- | --- | --- | --- |
+| B1 | E3 refund-silent-failure escalate 403 poll | ref 格式错 | 引用了交接回执号 `H1`，交接确实成功了，只是没给 ref |
+| B2 | A1 field-service-repair wait 405 push | **规则拦错** | 引文是客户在外呼电话里的原话；检查 B 只认聊天来访和 `user_reply`，没收录外呼结果里的 `customer_says`。（另外这句话是客户在问时段，拿来撤销承诺本身就不对，但规则拦的理由是"找不到"，这是错的） |
+| B3 | E3 insurance-claim-documents wait 405 poll | 拦得对 | 想用"用新版本替换承诺"当撤销理由，不是客户的话也不是政策 |
+| B4 | A1 credit-delinquency escalate 403 poll | ref 格式错 | 同 B1 |
+| B5 | A1 cross-channel-revisit escalate 403 poll | ref 格式错 | 同 B1 |
+| B6 | A1 insurance-claim-payout escalate 403 push | ref 格式错 | 同 B1 |
+| B7 | A1 field-service-repair wait 405 push | **规则拦错** | 同 B2（同一案子同一句话，加了 `Customer said` 前缀） |
+| B8 | E3 cross-channel-revisit wait 405 poll | 拦得对 | 用 `add_promise` 的 ref 当交接证据 |
+| B9 | A1 field-service-rework escalate 403 push | 拦得对 | 引的是对政策的转述，不是原文 |
+| B10 | A1 insurance-renewal-followup escalate 403 push | ref 格式错 | 同 B1 |
+| B11 | E3 insurance-renewal-followup wait 405 push | 拦得对 | 引的是工具返回里的字段，不是客户的话 |
+| B12 | A1 field-service-reschedule resolved 404 push | 拦得对 | 用发给客户的消息证明"改约请求处理完了"，承诺不是告知类 |
+| B13 | A1 field-service-noshow escalate 403 push | ref 格式错 | 同 B1 |
+| B14 | E3 cancel-partial-success resolved 404 poll | **规则拦错** | 承诺对象是订单号，证据是读这个订单的退款（`get_refund(refund_id=R1)`），调用参数里只有退款号，对象匹配不上；这次读取恰恰是该承诺"办完"的正确证据 |
+| B15 | A1 insurance-claim-documents escalate 403 poll | 拦得对 | 读之后又对同一理赔发了一次提醒（写），按规则要重读 |
+| B16 | E3 insurance-renewal-followup wait 405 push | 拦得对 | 引的是状态值 `under_review` |
+| B17 | A1 field-service-reschedule escalate 403 poll | 拦得对 | 用关单这次写操作当"办完"的证据 |
+| B18 | E3 credit-delinquency escalate 403 poll | **规则拦错** | 引文是客户在外呼里说的"会在 1 月 9 日 12:00 前还款"，同 B2 的缺口（拿还款承诺撤销"查是否入账"本身也不对，但规则拦的理由错了） |
+| B19 | E3 insurance-claim-documents escalate 403 poll | 拦得对 | 同 B15 |
+| B20 | A1 field-service-repair wait 405 push | **规则拦错** | 同 B2（同一案子第三次） |
+
+**检查 B 不过关的两个原因：**
+1. **实现缺口**：客户在外呼电话里的话（工具结果里的 `customer_says`）没有算作"客户消息"，引用这些原话会被当成找不到（B2、B7、B18、B20；其中 3 条来自同一个案子）。这是按任务书"出现在本案某条客户消息里"应当收录而没收录，属于代码缺陷。
+2. **对象匹配太窄**：读某个订单的退款（参数只有退款号）不算读这个订单（B14）。
+
+另有 6 条是把交接回执号 `H1` 当证据（第 3 项里 29 次），属于"描述没讲清"。
+
+**建议（等负责人定，未改）：** (1) 把外呼结果里的 `customer_says` 收录为客户消息；(2) 交接证据接受交接调用的 ref 或它返回的回执号；(3) 对象匹配：读调用返回的记录里如果带有承诺的对象 id，也算读过该对象（或者暂不改，接受这类退回）。改完在新的开发种子（406–408）上复测，并再抽 20 条检查 B。
