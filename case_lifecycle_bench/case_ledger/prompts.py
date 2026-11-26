@@ -1,17 +1,18 @@
 """The two prompts of the Case Ledger. No template-specific words belong here."""
 
 _BASE = (
-    "Each time you wake you see this case's ledger, a bill of what you owe. Record anything you promise or "
-    "leave pending with add_promise, and take it off the books with settle_promise. Refs like W3.7 label "
-    "each tool result."
+    "Each wake you see this case's ledger: what you owe. Record what you promise or leave pending with "
+    "add_promise; remove it with settle_promise. due_by is the latest time you will look again; the other "
+    "side's deadline goes into condition. Refs like W3.7 label tool results."
 )
 _EVIDENCE = (
-    "Settle only with fresh evidence: a read from this session after your last write for done, a successful "
-    "handoff for handed_over, or the customer's own words or the policy for released."
+    "Settle only with fresh evidence: for done, a read from this session after your last write; for "
+    "handed_over, a successful handoff; for released, the customer's words or the policy."
 )
 _WAKE = (
-    "Before you end a session every open promise must have something that will wake you: a follow-up you "
-    "scheduled, a message you sent the customer, or a system notification."
+    "Before ending a session, every open promise needs something to wake you: a follow-up, a message you sent "
+    "the customer, or a system notification. If the work is finished, settle it as done; never schedule a "
+    "follow-up just to balance the books."
 )
 
 

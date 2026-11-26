@@ -38,6 +38,7 @@ class PromiseBook:
         }
         self.wake = 0
         self.wake_label = "W0"
+        self.now = None
         self._seq = 0
         self._next_promise = 0
         self._end_rejects: dict = {}
@@ -64,6 +65,11 @@ class PromiseBook:
                 self.followups[session["trigger_id"]]["status"] = "fired"
             if session.get("message"):
                 self.customer_texts.append(str(session["message"]))
+            self.now = checks.parse_time(session.get("t"))
+            for promise in self.promises.values():
+                due = checks.parse_time(promise.get("due_by"))
+                if promise["status"] == "open" and due is not None and self.now is not None and self.now >= due:
+                    promise["overdue_wakes"] = promise.get("overdue_wakes", 0) + 1
             wake_calls: list = []
             state = {"n": 0, "scored": False, "ended": False}
             if self.config.record_only:
@@ -224,7 +230,7 @@ class PromiseBook:
 
     def _end_session(self, state, wake_calls, session):
         self._run_scorekeeper(state, wake_calls, session)
-        problems = checks.unbalanced(self.promises, self.followups, self.refs, self.push) if self.config.check_c else []
+        problems = checks.unbalanced(self.promises, self.followups, self.refs, self.push, self.now) if self.config.check_c else []
         if problems:
             used = self._end_rejects.get(self.wake, 0)
             if self.config.record_only:
@@ -241,7 +247,7 @@ class PromiseBook:
         """The agent stopped without calling end_session: score and count, but nothing can be sent back."""
         self.stats["implicit_ends"] += 1
         self._run_scorekeeper(state, wake_calls, session)
-        if self.config.check_c and checks.unbalanced(self.promises, self.followups, self.refs, self.push):
+        if self.config.check_c and checks.unbalanced(self.promises, self.followups, self.refs, self.push, self.now):
             self.stats["unbalanced_at_end"] += 1
 
     # -- the log ------------------------------------------------------------------------------------
@@ -254,6 +260,7 @@ class PromiseBook:
             "would_reject": self.would_reject,
             "scorekeeper_added": self.added_by_scorekeeper,
             "uncertain_left": [e["ref"] for e in self.pending if not e["reconciled"]],
+            "overdue_wakes": {p["id"]: p.get("overdue_wakes", 0) for p in self.promises.values() if p.get("overdue_wakes")},
             "statement_tokens": self.statement_tokens,
             "statement_tokens_mean": (sum(self.statement_tokens) / len(self.statement_tokens)) if self.statement_tokens else 0,
             **self.stats,

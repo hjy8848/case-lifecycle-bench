@@ -23,7 +23,9 @@ def normalize_ref(text) -> str:
 
 
 def _squash(text) -> str:
-    return re.sub(r"\s+", " ", str(text)).strip().lower()
+    """Lower case, punctuation removed, whitespace collapsed: a quote matches however it is punctuated."""
+    text = re.sub(r"['\u2019]", "", str(text))  # don't -> dont
+    return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", text)).strip().lower()
 
 
 # -- check A: reconcile first -------------------------------------------------------------
@@ -99,8 +101,12 @@ def promise_line(promise) -> str:
     return f"{promise['id']}: {promise['what']}"
 
 
-def unbalanced(promises, followups, refs, push):
-    """Open promises that nobody will wake, as readable lines."""
+def unbalanced(promises, followups, refs, push, now=None):
+    """Open promises that nobody will wake, as readable lines.
+
+    A promise whose due_by has come (now >= due_by) is balanced by any pending follow-up: nothing can be
+    scheduled before a time that has passed, so asking for that would trap the agent.
+    """
     problems = []
     pending = [task for task in followups.values() if task["status"] == "pending"]
     for promise in promises.values():
@@ -122,10 +128,14 @@ def unbalanced(promises, followups, refs, push):
                 problems.append(f"{promise_line(promise)} (no system notification arrives in this mode; schedule a follow-up)")
         else:
             due = parse_time(promise.get("due_by"))
-            ok = any(due is None or (parse_time(task["due_at"]) or due) <= due for task in pending)
+            overdue = due is not None and now is not None and now >= due
+            ok = any(due is None or overdue or (parse_time(task["due_at"]) or due) <= due for task in pending)
             if not ok:
-                when = f"before {promise['due_by']}" if due else "scheduled"
-                problems.append(f"{promise_line(promise)} (no follow-up {when})")
+                if overdue:
+                    problems.append(f"{promise_line(promise)} (overdue since {promise['due_by']}; no follow-up scheduled)")
+                else:
+                    when = f"before {promise['due_by']}" if due else "scheduled"
+                    problems.append(f"{promise_line(promise)} (no follow-up {when})")
     return problems
 
 

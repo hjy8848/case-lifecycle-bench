@@ -86,8 +86,12 @@ def ledger_tool_schemas() -> list[dict]:
                         "to": prop("string", "Who is owed: the customer or a team name."),
                         "what": prop("string", "What you owe."),
                         "done_when": prop("string", "What reading would show it is done."),
-                        "due_by": prop("string", "ISO time by which it is due, if any."),
-                        "condition": prop("string", "A condition that must hold before you act, if any."),
+                        "due_by": prop("string", "The latest time (ISO) you will come back to look at this."),
+                        "condition": prop(
+                            "string",
+                            "What must hold before you act, and the other side's own deadline if there is one "
+                            "(for example: customer said they will pay by 2026-01-07T18:00).",
+                        ),
                         "subject": prop("string", "The object id this is about, if any."),
                         "wake_by": prop("string", "followup, customer or event.", ["followup", "customer", "event"]),
                         "told_ref": prop("string", "Optional: ref of the call in which you spoke to the customer."),

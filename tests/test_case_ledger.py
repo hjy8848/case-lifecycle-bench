@@ -481,5 +481,78 @@ class AfterContactTest(unittest.TestCase):
         self.assertIn("add_ticket_note", [t for t, _ in base.calls])
 
 
+class OverdueTest(unittest.TestCase):
+    def test_after_due_by_any_pending_follow_up_balances_the_book(self):
+        book, env = PromiseBook(LedgerConfig.full()), Env()
+        wake(book, env, lambda call: (
+            call("add_promise", to="customer", what="check payment", done_when="posted", due_by="2026-01-06T10:00:00"),
+            call("schedule_followup", ticket_id="T1", due_at="2026-01-06T09:00:00", note="x"),
+            call("end_session"),
+        ))
+        seen = []
+
+        def later(call):
+            seen.append(call("end_session").get("error"))  # overdue and nothing pending: still unbalanced
+            call("schedule_followup", ticket_id="T1", due_at="2026-01-09T10:00:00", note="x")
+            seen.append(call("end_session").get("error"))  # any pending follow-up now balances it
+
+        _, holder = wake(book, env, later, t="2026-01-07T12:00:00", trigger_id="F1")
+        self.assertEqual(seen, ["ledger_unbalanced", None])
+        self.assertIn("OVERDUE since 2026-01-06T10:00:00 (1d 2h)", holder["session"]["case_ledger"])
+        self.assertEqual(book.log()["overdue_wakes"], {"P1": 1})
+
+    def test_due_by_before_the_other_sides_deadline_is_balanced_by_a_follow_up_before_due_by(self):
+        book, env = PromiseBook(LedgerConfig.full()), Env()
+        seen = []
+
+        def agent(call):
+            # The customer pays by Jan 7 18:00 (condition); the agent will look again by Jan 7 19:00 (due_by).
+            call("add_promise", to="customer", what="check the payment", done_when="payment posted",
+                 due_by="2026-01-07T19:00:00", condition="customer said they will pay by 2026-01-07T18:00")
+            call("schedule_followup", ticket_id="T1", due_at="2026-01-07T18:30:00", note="x")
+            seen.append(call("end_session").get("error"))
+
+        wake(book, env, agent)
+        self.assertEqual(seen, [None])
+
+    def test_a_follow_up_after_due_by_is_still_refused_before_due_by_comes(self):
+        book, env = PromiseBook(LedgerConfig.full()), Env()
+        seen = []
+
+        def agent(call):
+            call("add_promise", to="customer", what="check", done_when="d", due_by="2026-01-07T19:00:00")
+            call("schedule_followup", ticket_id="T1", due_at="2026-01-07T20:00:00", note="x")
+            seen.append(call("end_session").get("error"))
+
+        wake(book, env, agent)
+        self.assertEqual(seen, ["ledger_unbalanced"])
+
+
+class QuoteNormalizationTest(unittest.TestCase):
+    def test_released_quotes_ignore_case_whitespace_and_punctuation_and_misses_are_logged(self):
+        book, env = PromiseBook(LedgerConfig.full()), Env()
+        seen = []
+
+        def agent(call):
+            call("add_promise", to="customer", what="w", done_when="d")
+            seen.append(call("settle_promise", promise_id="P1", how="released", evidence="i dont want it any more"))
+            call("add_promise", to="customer", what="w2", done_when="d")
+            seen.append(call("settle_promise", promise_id="P2", how="released", evidence="please refund me twice"))
+
+        wake(book, env, agent, message="Never mind -- I DON'T want   it any more...")
+        self.assertEqual(seen[0], {"ok": True})
+        self.assertEqual(seen[1]["error"], "evidence_not_found")
+        quoted = [row["call"]["args"]["evidence"] for row in book.rejections if row["check"] == "B"]
+        self.assertEqual(quoted, ["please refund me twice"])  # an unmatched quote is logged word for word
+
+    def test_punctuation_and_case_do_not_matter(self):
+        book, env = PromiseBook(LedgerConfig.full()), Env()
+        seen = []
+        wake(book, env, lambda call: (call("add_promise", to="c", what="w", done_when="d"),
+                                      seen.append(call("settle_promise", promise_id="P1", how="released", evidence="please, CANCEL it"))),
+             message="Please cancel it. Thanks")
+        self.assertEqual(seen, [{"ok": True}])
+
+
 if __name__ == "__main__":
     unittest.main()
