@@ -5,6 +5,7 @@ someone to wake it) and never judge whether a business action was right. Rejecti
 and say what is missing and how to supply it, never which business action to take.
 """
 
+import json
 import re
 from datetime import datetime
 
@@ -64,6 +65,15 @@ def check_a(pending, journal, wake, target):
 # -- check B: settle with evidence --------------------------------------------------------
 
 
+def _receipt_matches(result, evidence) -> bool:
+    wanted = str(evidence or "").strip().upper()
+    if not wanted:
+        return False
+    if isinstance(result, dict):
+        return any(str(value).strip().upper() == wanted for value in result.values() if isinstance(value, (str, int)))
+    return str(result).strip().upper() == wanted
+
+
 def check_b(how, evidence, promise, refs, wake, customer_texts, policy):
     """Return None, or {"error", "why"} for a settle_promise call."""
     ref = normalize_ref(evidence)
@@ -75,7 +85,9 @@ def check_b(how, evidence, promise, refs, wake, customer_texts, policy):
             return {"error": "evidence_not_fresh", "why": "The read must be from this session, after you woke up."}
         subject = promise.get("subject")
         if subject:
-            if subject not in entry["touches"]:
+            # A read is about the object when its arguments name it, or when the record it returned
+            # carries the object's id (reading a refund of an order is reading about that order).
+            if subject not in entry["touches"] and str(subject) not in json.dumps(entry["result"], ensure_ascii=False):
                 return {"error": "evidence_not_fresh", "why": f"The read must be about {subject}."}
             last_write = max(
                 (row["seq"] for row in refs.values() if row["kind"] in {"write", "handoff"} and subject in row["touches"]),
@@ -85,6 +97,15 @@ def check_b(how, evidence, promise, refs, wake, customer_texts, policy):
                 return {"error": "evidence_not_fresh", "why": f"{subject} was written after that read; read it again."}
         return None
     if how == "handed_over":
+        if entry is None:
+            # The receipt a successful handoff returned (for example "H1") is accepted in place of its ref.
+            entry = next(
+                (
+                    row for row in refs.values()
+                    if row["kind"] == "handoff" and not row["error"] and _receipt_matches(row["result"], evidence)
+                ),
+                None,
+            )
         if entry is None or entry["kind"] != "handoff" or entry["error"]:
             return {"error": "evidence_not_a_handoff", "why": "Evidence for handed_over must be the ref of a handoff tool call that succeeded."}
         return None

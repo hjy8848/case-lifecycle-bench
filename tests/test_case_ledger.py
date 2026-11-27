@@ -554,5 +554,51 @@ class QuoteNormalizationTest(unittest.TestCase):
         self.assertEqual(seen, [{"ok": True}])
 
 
+class CheckBRevisionTest(unittest.TestCase):
+    def test_words_the_customer_said_on_a_call_can_be_quoted(self):
+        book = PromiseBook(LedgerConfig.full())
+        env = Env()
+        env.__class__ = type("E", (Env,), {"__call__": lambda self, tool, **a: {"delivered": True, "customer_says": "Please stop calling me about this."} if tool == "say_to_customer" else {"ok": True}})
+        seen = []
+        wake(book, env, lambda call: (call("add_promise", to="customer", what="w", done_when="d"),
+                                      call("say_to_customer", contact_id="C1", text="When can you pay?"),
+                                      seen.append(call("settle_promise", promise_id="P1", how="released", evidence="stop calling me about this"))))
+        self.assertEqual(seen, [{"ok": True}])
+
+    def test_a_handoff_receipt_is_accepted_in_place_of_its_ref(self):
+        book = PromiseBook(LedgerConfig.full())
+        env = Env()
+        env.__class__ = type("E", (Env,), {"__call__": lambda self, tool, **a: "H1" if tool == "escalate_to_human" else {"ok": True}})
+        seen = []
+        wake(book, env, lambda call: (call("add_promise", to="team", what="w", done_when="d"),
+                                      call("escalate_to_human", ticket_id="T1", note="x"),
+                                      seen.append(call("settle_promise", promise_id="P1", how="handed_over", evidence="H1")),
+                                      call("add_promise", to="team", what="w2", done_when="d"),
+                                      seen.append(call("settle_promise", promise_id="P2", how="handed_over", evidence="H9"))))
+        self.assertEqual(seen[0], {"ok": True})
+        self.assertEqual(seen[1]["error"], "evidence_not_a_handoff")
+
+    def test_a_read_whose_result_carries_the_object_id_counts_as_reading_that_object(self):
+        book = PromiseBook(LedgerConfig.full())
+        env = Env()
+        env.__class__ = type("E", (Env,), {"__call__": lambda self, tool, **a: {"refund_id": "R1", "order_id": "O1", "status": "succeeded"} if tool == "get_refund" else {"ok": True}})
+        seen = []
+        wake(book, env, lambda call: (call("add_promise", to="customer", what="refund", done_when="refund succeeded", subject="O1"),
+                                      call("get_refund", refund_id="R1"),  # W1.2, result names O1
+                                      seen.append(call("settle_promise", promise_id="P1", how="done", evidence="W1.2")),
+                                      call("add_promise", to="customer", what="other", done_when="d", subject="O2"),
+                                      seen.append(call("settle_promise", promise_id="P2", how="done", evidence="W1.2"))))
+        self.assertEqual(seen[0], {"ok": True})
+        self.assertEqual(seen[1]["error"], "evidence_not_fresh")
+
+    def test_a_message_to_the_customer_is_still_not_evidence_of_done(self):
+        book, env = PromiseBook(LedgerConfig.full()), Env()
+        seen = []
+        wake(book, env, lambda call: (call("add_promise", to="customer", what="tell them", done_when="told"),
+                                      call("send_message_to_user", user_id="U", channel="chat", text="Your refund is processing."),
+                                      seen.append(call("settle_promise", promise_id="P1", how="done", evidence="W1.2"))))
+        self.assertEqual(seen[0]["error"], "evidence_not_a_read")
+
+
 if __name__ == "__main__":
     unittest.main()

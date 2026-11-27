@@ -144,6 +144,9 @@ class PromiseBook:
         entry = self._entry(ref, tool, kind, args, result, state)
         if kind == "customer":
             self.customer_texts.append(str(args.get("text", "")))
+        if isinstance(result, dict) and isinstance(result.get("customer_says"), str):
+            # What the customer said on a call is a customer message too.
+            self.customer_texts.append(result["customer_says"])
         if kind in {"write", "handoff"} and entry["error"] == "timeout":
             self.pending.append({**entry, "reconciled": False})
         self._track_followup(tool, args, result)
